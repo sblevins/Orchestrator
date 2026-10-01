@@ -106,7 +106,11 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         if payload.get("takeover"):
             raise StateError("Takeover is an operator-only startup option")
         bound = store.open_session(
-            session_id, session["frontend"], project_id, observer=bool(session["observer"])
+            session_id,
+            session["frontend"],
+            project_id,
+            observer=bool(session["observer"]),
+            require_active=True,
         )
         if not bound["observer"]:
             _mirror_saved_prompts(store, session_id, project_id)

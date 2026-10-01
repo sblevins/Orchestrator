@@ -8,18 +8,33 @@ The repository's Pi extension is a thin owned bridge, not a plugin recommendatio
 
 ## Start and bind
 
-Run `bin/orchestrator start --frontend claude` or `bin/orchestrator start --frontend pi` from the Orchestrator checkout.
-Use `--home PATH` before `start` to select another private state directory.
-Add `--project ID` for a registered project, `--observer` for read-only observation, or explicit `--takeover` to replace its current coordinator.
-The launcher provides `ORCHESTRATOR_HOME` and `ORCHESTRATOR_SESSION_ID`.
-Bare Pi displays instructions to use the launcher rather than silently creating a different identity.
-Claude's `/project`, `/status`, and `/plan` commands use the shared MCP tools.
+Run `claude` or `pi` directly from `~/Agents/Orchestrator`.
+Claude discovers `CLAUDE.md`, project lifecycle hooks, and `.mcp.json`; Pi discovers `AGENTS.md` and `.pi/extensions/orchestrator.ts`.
+Native trust prompts still require user approval.
+The coordinator asks for a project, binds the instance, loads notes/status, and starts the shared supervisor as needed.
+Plain version: open the normal chat program here; the project supplies its coordinator setup automatically.
 
-Model and effort come explicitly from `roles.orchestrator`; a Claude frontend rejects a Codex role rather than silently changing providers.
-Pi maps the Claude adapter to `anthropic` and Codex to `openai-codex`.
-Claude receives explicit model and effort because the custom settings argument suppresses the local wrapper's model-pin settings.
-Pi receives a private per-instance session directory and explicit session ID.
-No frontend command enables permission bypass, print mode, bare mode, or terminal key injection.
+Claude startup resolves its own ancestor process identity and native conversation ID into a durable instance.
+Concurrent terminals never share an active-project setting.
+`/clear` changes the conversation ID but preserves the same process's coordinator binding.
+An in-process native `/resume` selects the target conversation's own instance and releases the previous conversation for another window.
+A rejected second process cannot use prompts, tools, or exit hooks to alter the original instance.
+Native resume can reopen a cleanly closed instance, but never silently reclaim an instance displaced by takeover.
+Pi uses its native session ID and a process ownership record, with orderly shutdown and reload handling.
+Existing native frontend processes are registered with `machine-resources`; background jobs still start through reservations.
+
+Native Pi selects the configured foreground model/effort at startup and preserves in-session model changes across turns and reloads.
+A missing model or authentication blocks requests visibly rather than silently falling back.
+Native Claude's foreground model is controlled by native settings and CLI pins, not SessionStart output.
+The repository defaults to Sonnet/low, but this machine's existing wrapper pins Opus/high at higher precedence.
+Use `/model` and `/effort` to change that session; no global wrapper or user model setting is modified here.
+Planner, critic, and monitor settings remain controlled by Orchestrator in both frontends.
+
+The optional `bin/orchestrator start --frontend claude|pi` launcher remains supported.
+Use `--home PATH` before `start` for a separate private state home, and `--project ID`, `--observer`, or explicit `--takeover` as needed.
+It supplies explicit foreground model/effort flags and a stable identity, so Claude's global model pin does not override that launch.
+Claude's `/project`, `/status`, and `/plan` commands use the shared MCP tools.
+No path enables permission bypass or terminal keystroke injection.
 
 ## Voice and feedback
 
@@ -33,7 +48,7 @@ Routine status prompts remain recorded without requesting a monitor review.
 Read-only tools and Orchestrator tools do not create duplicate tool-observation events.
 A Stop reply is recorded only after an outstanding substantive user prompt or external tool observation, not after every status response.
 Stop continuation is guarded by `stop_hook_active`, and SessionEnd closes only the frontend session without cancelling jobs.
-Existing inactive sessions are never reactivated by SessionStart, including sessions displaced by takeover.
+Only explicit native resume reconnects a cleanly closed Claude session; an ordinary startup does not revive an inactive session, and takeover-displaced sessions cannot reconnect implicitly.
 Child hooks are disabled by `ORCHESTRATOR_CHILD=1`.
 
 The default Stop watcher uses documented `asyncRewake`, waits at most 27,000 seconds, and has a 28,800-second hook timeout.
@@ -54,7 +69,9 @@ Plain version: seeing a message does not mark the problem as solved.
 
 The launcher generates owner-only hook settings with absolute installed paths, so a separate private home does not break hooks.
 It loads user settings plus its generated settings, excluding project/local settings to avoid registering the repository hooks twice.
-Both frontends receive the configured orchestrator role and personalization through a private prompt file.
+Launched frontends receive the configured role and personalization through a private prompt file; native startup supplies them through Claude hook context or Pi prompt sections.
+Claude PreToolUse and Pi tool-call guards block implementation tools and unrelated plugin tools, even when the native interface exposes them.
+The ordinary local Claude MCP configuration uses an explicit session ID from startup context, and the hook rejects attempts to use another instance's ID.
 Configured read tools are translated into the native frontend allowlist; native worker and file-edit tools are not included.
 Generated Claude MCP settings live at `data/frontend/<session-id>.mcp.json` with owner-only permissions and an absolute CLI path.
 The generated server receives the launcher-owned session ID rather than a model-supplied identity.
@@ -65,7 +82,9 @@ The shared API validates project ownership and mutation permissions.
 
 Run `python3 -m unittest discover -s tests -p 'test_frontends.py'` and the equivalent command for `test_hooks.py`.
 These tests make no paid calls and cover command construction, hook JSON, takeover safety, prompt delegation, quiet status replies, continuation guards, and disconnect behavior.
-Live voice, idle wakeup, preview-channel eligibility, in-session effective model selection, and permission-dialog delivery remain manual integration checks.
+The suite also tests installed Pi RPC auto-discovery without launcher variables or an explicit extension flag, with no provider calls.
+Native-style Claude parent processes test clear/resume aliases, and the installed Claude CLI confirms project MCP discovery.
+Live voice, idle wakeup, preview-channel eligibility, and permission-dialog delivery remain manual integration checks.
 
 Native Claude `/clear` preserves the durable instance while changing the native conversation ID.
 Resume uses the recorded native ID without changing the project binding.

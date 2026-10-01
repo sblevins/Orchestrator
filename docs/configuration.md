@@ -111,6 +111,9 @@ An executable launcher script is valid, for example `["/absolute/path/to/pi-laun
 Launcher scripts are trusted local programs, not an escape from specialist read-only restrictions.
 Pi is an interactive frontend, not a supported specialist adapter.
 Claude remains the preferred interactive frontend, with native voice handled by Claude itself.
+Both interfaces can start directly in the repository without the optional launcher.
+Native Pi applies `roles.orchestrator`; native Claude foreground selection follows its own project/user/CLI precedence, so a global CLI pin can override the project default.
+Use native `/model` and `/effort`, or the optional launcher, to select the configured fast Claude role explicitly.
 
 `workers` must contain only `enabled = false`.
 `routing.enabled` must be false, `routing.rules` must be an empty list, and optional `routing.first_mate` must be an empty table.

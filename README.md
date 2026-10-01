@@ -15,12 +15,13 @@ No Python runtime dependencies need installing.
 
 ```bash
 cd ~/Agents/Orchestrator
-./bin/orchestrator doctor
-./bin/orchestrator start --frontend claude
-# Alternatively:
-./bin/orchestrator start --frontend pi
+claude
+# Or:
+pi
 ```
 
+The repository hooks/extension initialize the coordinator automatically.
+Approve native project trust and the local Orchestrator integration when prompted; there is no separate launcher requirement.
 Tell the coordinator which project to work on and its existing directory.
 It can register the project, bind this instance, and retrieve that project's notes and status.
 Alternatively, register and select it yourself:
@@ -31,8 +32,14 @@ Alternatively, register and select it yourself:
 ```
 
 Open another terminal and start another instance for a different project.
-A second instance for the same project must use `--observer` or an explicit `--takeover`.
-Use `--resume SESSION_ID` to reconnect to a previous instance with its original frontend.
+Use the optional `bin/orchestrator start` launcher for explicit `--observer`, `--takeover`, or `--project` options.
+Normal native resume restores the project binding without taking over another active instance.
+A displaced instance must not silently reclaim authority.
+
+**Foreground model:** native Pi selects `roles.orchestrator` automatically.
+Native Claude respects its own settings; this machine's global wrapper currently pins Opus/high and overrides the project's Sonnet/low default.
+Use Claude's `/model` and `/effort` to change that session, or the optional launcher to apply the configured foreground role explicitly.
+Background roles always use Orchestrator configuration.
 
 ## Configure
 
@@ -85,7 +92,7 @@ Third-party Pi orchestration plugins remain undecided and are not installed by t
 There is no distributed scheduler, automatic publishing, automatic permission approval, or guarantee of exactly-once execution.
 
 This is a single-machine implementation, not a Temporal deployment.
-The supervisor survives frontend exits, but an OS restart or supervisor crash requires starting it again; reconnecting through the launcher does this.
+The supervisor survives frontend exits, but an OS restart or supervisor crash requires starting it again; binding or resuming a project in either frontend does this.
 Native voice, live model access, and Claude's idle wake behavior require interactive acceptance testing.
 Codex has no enforced dollar cap in this implementation; deadlines still apply.
 Plain version: the durable planning foundation is ready to try, but it cannot yet send workers to change your project.

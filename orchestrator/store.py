@@ -237,6 +237,8 @@ class Store:
         project_id: str | None = None,
         observer=False,
         takeover=False,
+        reconnect=False,
+        require_active=False,
     ) -> dict:
         identifier(session_id)
         if frontend not in {"claude", "pi", "test"}:
@@ -245,6 +247,18 @@ class Store:
             existing = database.execute(
                 "SELECT * FROM sessions WHERE id=?", (session_id,)
             ).fetchone()
+            if require_active and (not existing or not existing["active"]):
+                raise StateError("This instance is inactive; reconnect through the native frontend")
+            if existing and not existing["active"] and reconnect:
+                displaced = database.execute(
+                    "SELECT 1 FROM events WHERE kind='session.takeover' "
+                    "AND json_extract(payload, '$.old_session')=? LIMIT 1",
+                    (session_id,),
+                ).fetchone()
+                if displaced:
+                    raise StateError(
+                        "This instance was replaced; start a new conversation or explicitly take over"
+                    )
             if existing and existing["project_id"] not in (None, project_id):
                 raise StateError("A coordinator session cannot change projects")
             if existing and bool(existing["observer"]) != bool(observer):

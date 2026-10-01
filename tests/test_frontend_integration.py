@@ -53,8 +53,14 @@ extension({
   on(name, handler) { handlers.set(name, handler); },
   registerTool(value) { tool = value; },
   sendMessage() {},
+  setActiveTools() {},
   async exec(binary, args, options) {
-    assert(options.timeout === 5000);
+    assert(options.timeout === (args.includes("bootstrap") ? 30000 : 5000));
+    if (args.includes("bootstrap")) return {code: 0, stdout: JSON.stringify({
+      session: {id: process.env.ORCHESTRATOR_SESSION_ID}, instructions: "Coordinator instructions",
+      config: {roles: {orchestrator: {allowed_tools: ["Read", "Glob", "Grep"]}}}
+    })};
+    if (args.includes("close")) return {code: 0, stdout: "{}"};
     const path = args[args.indexOf("--payload-file") + 1];
     assert(path && !args.includes("--payload"));
     assert.equal((await stat(path)).mode & 0o777, 0o600);
@@ -77,7 +83,7 @@ const prompt = "distinctive long prompt " + "x".repeat(200000);
 await handlers.get("input")({source: "interactive", text: prompt});
 failure = true;
 await assert.rejects(tool.execute("id", {action: "record_prompt", payload: {prompt}}), /deliberate transport failure/);
-await handlers.get("session_shutdown")();
+await handlers.get("session_shutdown")({}, {hasUI: false});
 // Let the initial poll finish its finally block before verifying cleanup.
 await new Promise(resolve => setImmediate(resolve));
 for (const path of paths) await assert.rejects(stat(path), {code: "ENOENT"});

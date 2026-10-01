@@ -7,7 +7,30 @@ import { tmpdir } from "node:os";
 
 /** Local bridge only. The Python service owns scheduling and durable acknowledgments. */
 export default function (pi: ExtensionAPI) {
-  const binary = resolve(dirname(fileURLToPath(import.meta.url)), "../../bin/orchestrator");
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  const binary = resolve(root, "bin/orchestrator");
+  const child = process.env.ORCHESTRATOR_CHILD === "1";
+  const readTools: Record<string, string[]> = { Read: ["read"], Glob: ["find", "ls"], Grep: ["grep"] };
+  let allowedTools = new Set<string>();
+  let instructions = "";
+  let startupError = "Orchestrator has not initialized";
+  let ready = false;
+  let claimed = false;
+
+  function report(ctx: ExtensionContext, error: unknown) {
+    const message = `Orchestrator blocked: ${String(error)}`;
+    if (ctx.hasUI) ctx.ui.notify(message, "error");
+    else console.error(message);
+  }
+
+  async function command(args: string[]) {
+    if (!home) throw new Error("Orchestrator home is unavailable");
+    const result = await pi.exec(binary, ["--home", home, ...args], { timeout: args[0] === "bootstrap" ? 30000 : 5000 });
+    if (result.code !== 0 || result.killed) throw new Error(result.stderr || result.stdout || "Orchestrator command failed");
+    const data = JSON.parse(result.stdout);
+    if (data.error) throw new Error(String(data.error));
+    return data;
+  }
   let sessionId: string | undefined;
   let home: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -16,7 +39,7 @@ export default function (pi: ExtensionAPI) {
   const delivered = new Set<number>();
 
   async function request(action: string, payload: Record<string, unknown> = {}, signal?: AbortSignal) {
-    if (!sessionId || !home) throw new Error("Start this frontend with bin/orchestrator start --frontend pi");
+    if (!ready || !sessionId || !home) throw new Error(startupError);
     // pi.exec has no stdin option. Keep full prompts out of argv and process listings.
     const requestDirectory = await mkdtemp(resolve(tmpdir(), "orchestrator-request-"));
     try {
@@ -74,21 +97,84 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on("input", async (event) => {
-    if (event.source !== "extension" && sessionId && home) {
-      await request("record_prompt", { prompt: event.text });
+  pi.on("input", async (event, ctx) => {
+    if (child) return { action: "continue" };
+    if (!ready) {
+      report(ctx, startupError);
+      return { action: "handled" };
+    }
+    if (event.source !== "extension") {
+      try {
+        await request("record_prompt", { prompt: event.text });
+      } catch (error) {
+        report(ctx, error);
+        return { action: "handled" };
+      }
     }
     return { action: "continue" };
   });
 
+  pi.on("tool_call", async (event) => {
+    if (child) return;
+    if (!ready || !allowedTools.has(event.toolName)) {
+      return { block: true, reason: ready ? "Orchestrator allows only configured read tools and its owned bridge" : startupError };
+    }
+  });
+
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (child) return;
+    if (!ready) {
+      report(ctx, startupError);
+      ctx.abort();
+      return;
+    }
+    pi.setActiveTools([...allowedTools]);
+    event.systemPromptOptions.sections.orchestrator = instructions;
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     stop();
-    sessionId = process.env.ORCHESTRATOR_SESSION_ID;
-    home = process.env.ORCHESTRATOR_HOME;
+    ready = false;
+    claimed = false;
     delivered.clear();
-    if (!sessionId || !home || process.env.ORCHESTRATOR_CHILD === "1") {
-      sessionId = undefined;
-      if (ctx.hasUI) ctx.ui.notify("Use bin/orchestrator start --frontend pi to enable the shared supervisor.", "info");
+    if (child) return;
+    const launched = Boolean(process.env.ORCHESTRATOR_SESSION_ID && process.env.ORCHESTRATOR_HOME);
+    sessionId = process.env.ORCHESTRATOR_SESSION_ID || ctx.sessionManager.getSessionId();
+    home = process.env.ORCHESTRATOR_HOME || root;
+    pi.setActiveTools([]);
+    try {
+      const bootstrap = await command(["bootstrap", "--frontend", "pi", "--session", sessionId!, "--pid", String(process.pid)]);
+      claimed = true;
+      if (bootstrap.session?.id !== sessionId || typeof bootstrap.instructions !== "string") {
+        throw new Error("Invalid Orchestrator bootstrap response");
+      }
+      const role = bootstrap.config.roles.orchestrator;
+      if (!Array.isArray(role.allowed_tools) || role.allowed_tools.some((name: string) => !readTools[name])) {
+        throw new Error("Orchestrator configuration must contain only Read, Glob, and Grep tools");
+      }
+      allowedTools = new Set([...(role.allowed_tools as string[]).flatMap((name) => readTools[name]), "orchestrator"]);
+      instructions = bootstrap.instructions;
+      // Reload creates a new extension runtime but must not undo an in-session /model change.
+      const initialized = ctx.sessionManager.getBranch().some((entry) => entry.type === "custom" &&
+        entry.customType === "orchestrator-bootstrap" &&
+        (entry.data as { pid?: number; sessionId?: string })?.pid === process.pid &&
+        (entry.data as { sessionId?: string })?.sessionId === sessionId);
+      if (!launched && !initialized) {
+        const provider = ({ claude: "anthropic", codex: "openai-codex" } as Record<string, string>)[role.adapter];
+        const model = provider && ctx.modelRegistry.find(provider, role.model);
+        if (!model) throw new Error(`Configured Orchestrator model not found: ${provider || role.adapter}/${role.model}`);
+        if (!(await pi.setModel(model))) throw new Error(`Authentication unavailable for Orchestrator model: ${provider}/${role.model}`);
+        const efforts = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+        if (!efforts.includes(role.effort)) throw new Error(`Invalid Orchestrator effort: ${role.effort}`);
+        pi.setThinkingLevel(role.effort);
+        pi.appendEntry("orchestrator-bootstrap", { pid: process.pid, sessionId });
+      }
+      ready = true;
+      pi.setActiveTools([...allowedTools]);
+    } catch (error) {
+      startupError = String(error);
+      pi.setActiveTools([]);
+      report(ctx, startupError);
       return;
     }
     for (const entry of ctx.sessionManager.getBranch()) {
@@ -103,5 +189,18 @@ export default function (pi: ExtensionAPI) {
     // Handlers are registered before polling can trigger a model turn.
     void poll(ctx, generation);
   });
-  pi.on("session_shutdown", async () => { stop(); sessionId = undefined; home = undefined; });
+  pi.on("session_shutdown", async (_event, ctx) => {
+    stop();
+    ready = false;
+    if (claimed && sessionId && home) {
+      claimed = false;
+      try {
+        await command(["session", "close", sessionId]);
+      } catch (error) {
+        report(ctx, error);
+      }
+    }
+    sessionId = undefined;
+    home = undefined;
+  });
 }

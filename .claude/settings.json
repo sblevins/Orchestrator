@@ -1,13 +1,92 @@
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks SessionStart", "timeout": 5}]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks UserPromptSubmit", "timeout": 5}]}],
-    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks PostToolUse", "timeout": 2}]}],
-    "PostToolUseFailure": [{"matcher": "*", "hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks PostToolUseFailure", "timeout": 2}]}],
-    "Stop": [{"hooks": [
-      {"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks Stop", "timeout": 5},
-      {"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" watch --seconds 27000", "asyncRewake": true, "timeout": 28800}
-    ]}],
-    "SessionEnd": [{"hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks SessionEnd", "timeout": 2}]}]
-  }
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks SessionStart",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks UserPromptSubmit",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks PostToolUse",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks PostToolUseFailure",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks Stop",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" watch --seconds 27000",
+            "asyncRewake": true,
+            "timeout": 28800
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks SessionEnd",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/bin/orchestrator\" hooks PreToolUse",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "model": "claude-sonnet-5-5",
+  "effortLevel": "low"
 }

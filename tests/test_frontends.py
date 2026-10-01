@@ -103,4 +103,4 @@ class FrontendTests(unittest.TestCase):
                         self.assertEqual(hook["timeout"], 28800)
                         self.assertIn("27000", hook["command"])
                     else:
-                        self.assertIn(hook["timeout"], (2, 5))
+                        self.assertIn(hook["timeout"], (2, 5, 30))

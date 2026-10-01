@@ -48,6 +48,12 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show the exact launch command without starting models",
     )
+    bootstrap_command = commands.add_parser(
+        "bootstrap", help="Initialize a native frontend automatically"
+    )
+    bootstrap_command.add_argument("--frontend", choices=("claude", "pi"), required=True)
+    bootstrap_command.add_argument("--session", required=True)
+    bootstrap_command.add_argument("--pid", type=int)
     project = commands.add_parser("project")
     project_commands = project.add_subparsers(dest="project_command", required=True)
     project_commands.add_parser("list")
@@ -302,6 +308,11 @@ def main(argv=None) -> int:
         command = arguments.command
         if command == "start":
             return start(home, arguments)
+        if command == "bootstrap":
+            from .bootstrap import bootstrap
+
+            emit(bootstrap(home, arguments.frontend, arguments.session, arguments.pid))
+            return 0
         if command == "mcp":
             from .mcp import MCPServer
 
@@ -313,7 +324,13 @@ def main(argv=None) -> int:
             if os.environ.get("ORCHESTRATOR_CHILD") == "1":
                 emit({})
                 return 0
-            emit(handle_hook(home, arguments.event, _read_hook_input()))
+            try:
+                emit(handle_hook(home, arguments.event, _read_hook_input()))
+            except (ValueError, OSError, RuntimeError) as error:
+                if arguments.event in {"PreToolUse", "UserPromptSubmit"}:
+                    print(f"Orchestrator blocked: {error}", file=sys.stderr)
+                    return 2  # Native Claude's blocking hook error contract.
+                raise
             return 0
         if command == "watch":
             if os.environ.get("ORCHESTRATOR_CHILD") == "1":
@@ -321,9 +338,10 @@ def main(argv=None) -> int:
             session_id = arguments.session
             if not session_id:
                 hook_input = _read_hook_input()
-                session_id = os.environ.get("ORCHESTRATOR_SESSION_ID") or hook_input.get(
-                    "session_id"
-                )
+                from .bootstrap import verify_claude_owner
+
+                native_id = hook_input.get("session_id")
+                session_id = verify_claude_owner(home, native_id) if native_id else None
             if not session_id:
                 return 0
             return watch(home, session_id, arguments.seconds)

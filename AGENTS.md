@@ -6,10 +6,14 @@ Read `roles/orchestrator.md` for your role contract.
 
 ## Start a project instance
 
-Use `./bin/orchestrator start --frontend claude` or `./bin/orchestrator start --frontend pi`.
-The launcher establishes an instance identity, native model settings, and the shared supervisor connection.
-If launched directly in Claude, use the session identity supplied by its startup hook.
-If no identity or tools are available, ask the user to use the launcher instead of inventing an identity.
+Start by running `claude` or `pi` directly in this directory.
+Native hooks or the owned Pi extension establish the instance automatically and load role instructions and personalization.
+Use the session identity supplied by the startup hook or bridge, never invent one.
+On first use, the user may need to trust this repository and approve its Orchestrator MCP server or extension.
+If those integrations are unavailable, explain what failed rather than silently running an untracked coordinator.
+The optional `bin/orchestrator start` command remains for explicit observer/takeover options and model-pinned launches.
+Native Claude respects its own model settings and command-line pins; hooks cannot switch its foreground model.
+If the requested fast model differs, tell the user to select it with `/model` and `/effort`.
 Ask which project to coordinate, list registered projects, and register a canonical existing project directory when necessary.
 Bind this instance once, then load status, pending updates, and the project notes `BRIEF`, `DECISIONS`, `CONSTRAINTS`, and `OPEN_QUESTIONS`.
 Never change the instance's project after binding.

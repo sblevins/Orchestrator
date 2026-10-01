@@ -17,9 +17,12 @@ The current First Mate reference was pulled and audited at `8f756bbc287c5bdfacc6
 
 ## Validation
 
-The 124 passing offline tests exercise real subprocesses with fake model harnesses, including frontend disconnect/reconnect, large prompt transport, native Claude clear/resume identity, private-home hooks, graph constraints, stale scope fencing, and transaction-boundary recovery.
+The 131 passing offline tests exercise real subprocesses with fake model harnesses, including frontend disconnect/reconnect, large prompt transport, native Claude clear/resume identity, private-home hooks, graph constraints, stale scope fencing, and transaction-boundary recovery.
 Python lint and formatting are checked with Ruff.
-The installed Pi bridge is tested without inference.
+Installed Pi auto-discovery is tested through its actual RPC mode, without launcher variables, an explicit extension flag, or inference.
+Native Claude project MCP discovery is verified with its CLI; process-based clear/resume identity is exercised with real subprocess fixtures.
+Running `claude` or `pi` in the repository initializes the coordinator automatically.
+The global Claude foreground model pin remains unchanged; native `/model` selection or the optional launcher is required to override it.
 These checks do not prove paid model access, answer quality, native microphone behavior, or live Claude idle wakeup.
 
 ## Explicitly pending
