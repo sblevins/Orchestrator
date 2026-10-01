@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "orchestrator": {
+      "command": "${CLAUDE_PROJECT_DIR}/bin/orchestrator",
+      "args": ["mcp"]
+    }
+  }
+}
