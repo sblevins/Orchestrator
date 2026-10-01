@@ -89,7 +89,23 @@ def build_frontend_command(
             "--effort",
             role["effort"],
             "--tools",
-            ",".join([*role["allowed_tools"], "AskUserQuestion"]),
+            ",".join([*role["allowed_tools"], "AskUserQuestion", "Agent"]),
+            "--agents",
+            json.dumps(
+                {
+                    "orchestrator-watcher": {
+                        "description": "Observe an existing supervised worker, without executing work.",
+                        "prompt": (ROOT / ".claude/agents/orchestrator-watcher.md")
+                        .read_text()
+                        .split("---", 2)[-1]
+                        .strip(),
+                        "model": "haiku",
+                        "tools": ["mcp__orchestrator__watch_worker"],
+                        "background": True,
+                        "maxTurns": 2,
+                    }
+                }
+            ),
             "--session-id",
             session_id,
             "--settings",

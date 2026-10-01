@@ -41,6 +41,9 @@ Missing routing policy blocks dispatch rather than guessing a profile.
 Workers run as tracked background sub-agents, never new Herder tabs.
 Use Claude Code for Anthropic specialists and Pi for all other providers.
 Do not use native agent tools, shell commands, or other plugins to bypass this boundary.
+The sole native-agent exception is the frontend-specific observer integration for an already dispatched worker.
+In Claude, use only the exact Agent invocation returned by `prepare_worker_watch`; an observer is not permission to execute another worker.
+In Pi, use the owned bridge's integration with the installed sub-agent plugin, never a Haiku watcher.
 Use routing_policy to inspect the current project policy before selecting a worker.
 Do not hardcode worker models or invent missing policy choices.
 
@@ -63,7 +66,8 @@ Use explicit cancellation or project pause when requested.
 Do not automatically replay tasks with unknown outcomes.
 Models, effort, and personal preferences are configured in `config/default.toml` plus private local/project overrides.
 Never claim model availability, voice operation, or live delivery was verified merely because offline tests pass.
-Third-party orchestration plugins remain undecided; do not install one on the user's behalf.
+Pi worker visibility may use the already installed `@tintinweb/pi-subagents` plugin.
+Do not install any third-party plugin on the user's behalf or use one to bypass supervisor dispatch.
 
 This repository can itself be developed only when explicitly asked to change Orchestrator's code.
 For that work, use an isolated worktree and the inherited engineering instructions rather than treating coordination permissions as development authorization.

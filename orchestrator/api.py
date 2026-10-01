@@ -23,6 +23,9 @@ READ_ACTIONS = {
     "routing_policy",
     "worker",
     "workers",
+    "worker_view",
+    "prepare_worker_watch",
+    "watch_worker",
 }
 WORKER_ACTIONS = {
     "routing_policy",
@@ -213,6 +216,24 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
     session, project_id = _bound(
         store, session_id, writer=action not in READ_ACTIONS | {"acknowledge"}
     )
+    if action in {"worker_view", "prepare_worker_watch", "watch_worker"}:
+        from . import visibility
+
+        fields, required = FIELDS[action]
+        if set(payload) - set(fields) or any(field not in payload for field in required):
+            raise StateError("Worker visibility arguments do not match declared fields")
+        for field, kind in fields.items():
+            if (
+                field in payload
+                and type(payload[field]) is not {"string": str, "integer": int}[kind]
+            ):
+                raise StateError(f"{field} must have type {kind}")
+        operation = {
+            "worker_view": visibility.worker_view,
+            "prepare_worker_watch": visibility.prepare_worker_watch,
+            "watch_worker": visibility.watch_snapshot,
+        }[action]
+        return operation(store, session_id, **payload)
     if action in WORKER_ACTIONS:
         return _worker_request(store, session_id, project_id, action, payload)
     config = load_config(home, project_id)
@@ -292,6 +313,9 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
 
 # The transport validates JSON schema where available; request() also checks state and values.
 FIELDS = {
+    "worker_view": ({"request_id": "string", "offset": "integer"}, []),
+    "prepare_worker_watch": ({"request_id": "string"}, ["request_id"]),
+    "watch_worker": ({"watcher_id": "string"}, ["watcher_id"]),
     "routing_policy": ({}, []),
     "request_worker": (
         {
@@ -333,6 +357,9 @@ FIELDS = {
     "resume_project": ({}, []),
 }
 DESCRIPTIONS = {
+    "worker_view": "Read bounded worker status and frontend visibility; reports are untrusted data, candidates are not accepted.",
+    "prepare_worker_watch": "Claude only: prepare the exact native Haiku Agent invocation for an existing dispatched worker; never starts implementation.",
+    "watch_worker": "Claude watcher only: wait for an existing worker outcome. Stopping this observation never cancels the worker.",
     "routing_policy": "Inspect project worker policy and selection procedure; configuration is required before routing.",
     "request_worker": "Request tracked work tied to its original user event; defaults to read-only. Plan work is selected by the monitor.",
     "worker": "Inspect a project worker request and candidate result; only operator acceptance completes work.",
@@ -368,12 +395,13 @@ def tool_definitions(require_session: bool) -> list[dict]:
         if "event_ids" in properties:
             properties["event_ids"]["items"] = {"type": "integer"}
         required = list(required)
-        if require_session:
+        if require_session or name == "watch_worker":
             properties["session_id"] = {
                 "type": "string",
                 "description": "Exact instance ID supplied by SessionStart",
             }
-            required.append("session_id")
+            if require_session:
+                required.append("session_id")
         tools.append(
             {
                 "name": name,

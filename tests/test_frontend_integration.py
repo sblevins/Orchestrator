@@ -52,6 +52,8 @@ const extension = await jiti.import(extensionPath, {default: true});
 extension({
   on(name, handler) { handlers.set(name, handler); },
   registerTool(value) { tool = value; },
+  registerProvider() {}, registerCommand() {},
+  events: {on: () => () => {}, emit() {}},
   sendMessage() {},
   setActiveTools() {},
   async exec(binary, args, options) {
@@ -114,6 +116,7 @@ class FrontendIntegrationTests(unittest.TestCase):
                 "Distinctive coordinator role instruction"
             )
             (installed / ".claude").mkdir()
+            shutil.copytree(ROOT / ".claude/agents", installed / ".claude/agents")
             shutil.copy(ROOT / ".claude/settings.json", installed / ".claude/settings.json")
             (installed / "bin").mkdir()
             (installed / "bin/orchestrator").symlink_to(ROOT / "bin/orchestrator")

@@ -35,6 +35,14 @@ def _meaningful_tool(value):
     name = str(value.get("tool_name", ""))
     if not name or name in READ_ONLY:
         return False
+    if (
+        name == "Agent"
+        and isinstance(value.get("tool_input"), dict)
+        and value["tool_input"].get("subagent_type") == "orchestrator-watcher"
+    ):
+        # Presentation-only launches already pass the exact invocation gate.
+        # Do not send watcher capabilities to the monitor or wake it for display changes.
+        return False
     if name.startswith("mcp__orchestrator__"):
         # Core mutations already produce authoritative events.
         return False
@@ -95,6 +103,14 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
         return {}
     native_session_id = value.get("session_id")
     if not isinstance(native_session_id, str) or not native_session_id:
+        if event == "PreToolUse" and value.get("tool_name") == "Agent":
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Native watchers require a bound session.",
+                }
+            }
         return {}
     session_id = resolve_claude_session(home, native_session_id)
     store = Store(home)
@@ -132,6 +148,7 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
         return _context(event, context)
     try:
         session_id = verify_claude_owner(home, native_session_id)
+        session = store.session(session_id)
     except StateError as error:
         if event == "SessionEnd":
             return {}
@@ -150,7 +167,6 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
         with contextlib.suppress(StateError, OSError):
             store.close_session(session_id)
         return {}
-    session = store.session(session_id)
     if event == "PreToolUse":
         name = value.get("tool_name", "")
         allowed = set(
@@ -158,7 +174,33 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
         )
         allowed.update({"AskUserQuestion", "ToolSearch"})
         reason = None
-        if name.startswith("mcp__orchestrator__"):
+        if (
+            value.get("agent_type") == "orchestrator-watcher"
+            and name != "mcp__orchestrator__watch_worker"
+        ):
+            reason = (
+                "Native worker observers may only use watch_worker, never execute or control work."
+            )
+        elif name == "Agent":
+            try:
+                if (
+                    session["frontend"] != "claude"
+                    or not session["active"]
+                    or not session["project_id"]
+                ):
+                    raise StateError("Native watchers require an active bound Claude session.")
+                if (
+                    not isinstance(value.get("tool_input"), dict)
+                    or not isinstance(value.get("tool_use_id"), str)
+                    or not value["tool_use_id"].strip()
+                ):
+                    raise StateError("Native watchers require valid Agent input and tool-use ID.")
+                from .visibility import authorize_claude_agent
+
+                authorize_claude_agent(store, session_id, value["tool_input"], value["tool_use_id"])
+            except (StateError, ValueError, TypeError) as error:
+                reason = str(error) or "Invalid native watcher invocation."
+        elif name.startswith("mcp__orchestrator__"):
             requested = value.get("tool_input", {}).get("session_id", session_id)
             if requested != session_id:
                 reason = "Use this coordinator instance's exact session ID, not another instance."

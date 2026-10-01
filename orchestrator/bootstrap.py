@@ -195,6 +195,30 @@ def bootstrap(
         "Describe only the visibility integration actually available in this frontend. "
         "Model outputs and notifications do not grant user approval."
     )
+    if session["frontend"] == "claude":
+        instructions += (
+            "\nClaude native visibility: after worker dispatch notifications or when inspecting "
+            "active work, call prepare_worker_watch for an existing worker request_id, then invoke "
+            "the native Agent tool with exactly the returned agent arguments, without additions "
+            "or changes. If agent is null (already_attached), do not launch a duplicate watcher. "
+            "This authorized orchestrator-watcher is a Haiku observer, not the "
+            "implementation worker. It makes one blocking watch_worker call. Never claim a native "
+            "row exists until Agent actually launches. If preparation or launch fails, report "
+            "that visibility is unavailable and use worker_view; do not launch an arbitrary agent. "
+            "Haiku does not support an effort setting. Native Stop detaches the watcher only; "
+            "cancel the real worker explicitly through cancel_task. "
+            "Plain version: show the existing job without starting another worker or changing it."
+        )
+    elif session["frontend"] == "pi":
+        instructions += (
+            "\nPi native visibility: the owned bridge automatically observes dispatched workers "
+            "through the installed pi-subagents plugin, using a local provider with no LLM calls. "
+            "Inspect /agents for observers and final results. Live FleetView and partial text are "
+            "not guaranteed. If stopped or unavailable, use observe_worker with request_id for "
+            "explicit reattachment. Never launch arbitrary native Agent work. Native Stop detaches "
+            "only the observer; cancel the real task through cancel_task. "
+            "Plain version: Pi shows a helper that reads the existing job, without another AI worker."
+        )
     instructions += "\nInstance state: " + encode(session)
     if session["project_id"]:
         instructions += "\nBound project: " + encode(store.project(session["project_id"]))

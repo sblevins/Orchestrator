@@ -3,8 +3,9 @@
 Claude Code is the preferred frontend; Pi is also supported.
 Both remain native interactive terminals and use the same local supervisor and durable project state.
 Plain version: either chat program can manage the same jobs without starting a second job manager.
-No third-party Pi integration has been selected or installed; plugin selection remains pending.
-The repository's Pi extension is a thin owned bridge, not a plugin recommendation.
+Pi worker visibility uses the installed `@tintinweb/pi-subagents` plugin through public APIs only; no plugin is installed automatically.
+The owned extension remains the supervisor bridge, and native observers do not become worker executors.
+See [worker visibility](worker-visibility.md) for Claude-only Haiku watchers and Pi's local observers.
 
 ## Start and bind
 
@@ -72,7 +73,8 @@ It loads user settings plus its generated settings, excluding project/local sett
 Launched frontends receive the configured role and personalization through a private prompt file; native startup supplies them through Claude hook context or Pi prompt sections.
 Claude PreToolUse and Pi tool-call guards block implementation tools and unrelated plugin tools, even when the native interface exposes them.
 The ordinary local Claude MCP configuration uses an explicit session ID from startup context, and the hook rejects attempts to use another instance's ID.
-Configured read tools are translated into the native frontend allowlist; native worker and file-edit tools are not included.
+Configured read tools are translated into the native frontend allowlist; file-edit tools and untracked worker dispatch remain blocked.
+Claude Agent is permitted only for an exact prepared watcher invocation; Pi spawns observers through its owned public-RPC integration, not unrestricted Agent tools.
 Generated Claude MCP settings live at `data/frontend/<session-id>.mcp.json` with owner-only permissions and an absolute CLI path.
 The generated server receives the launcher-owned session ID rather than a model-supplied identity.
 Notes and worker output are untrusted task data, not permission to change scope or approve work.

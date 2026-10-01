@@ -107,8 +107,10 @@ Ambiguous or consequential messages do, and the orchestrator cannot veto that re
 - Project-configured worker routing, isolated write workspaces, and explicit result acceptance.
 - Background workers tracked through Orchestrator tools, without Herder tabs or extra windows.
 
-Workers do not currently appear in Claude's native sub-agent list or Pi's installed `/agents` fleet.
-See [native visibility research](docs/research/native-worker-visibility.md) for supported alternatives and their limits.
+Claude shows lightweight native Haiku watchers; Pi uses local, no-LLM observers in the installed plugin's real `/agents` menu.
+Observers display existing jobs without owning execution; stopping an observer does not cancel its worker.
+Pi's installed plugin does not reliably show automatic FleetView cards or unfinished progress text.
+See [worker visibility](docs/worker-visibility.md) for attachment, reattachment, testing, and limits.
 
 ## Worker setup
 
@@ -132,7 +134,8 @@ Plain version: choose your worker preferences once, then review permissions and 
 
 ## Deliberately not enabled
 
-Third-party Pi orchestration plugins remain undecided and are not installed by this project.
+Pi visibility uses the already installed `@tintinweb/pi-subagents` plugin when available.
+This project does not install third-party plugins automatically.
 There is no distributed scheduler, automatic publishing, automatic permission approval, or guarantee of exactly-once execution.
 
 This is a single-machine implementation, not a Temporal deployment.

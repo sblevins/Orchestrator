@@ -2,8 +2,10 @@
 
 Workers and routing are enabled in tracked configuration, but **there are no worker model defaults**.
 Workers are tracked background jobs, not new tabs or windows.
-They currently appear through Orchestrator tools, not native harness sub-agent lists.
-See [native visibility research](research/native-worker-visibility.md) before treating those interfaces as interchangeable.
+Durable records remain in Orchestrator tools; frontend-specific observers also represent jobs in native sub-agent interfaces.
+Claude uses Haiku watchers and Pi uses local no-LLM plugin observers.
+Stopping an observer does not cancel the worker, and Pi FleetView/live partial text remain limited.
+See [worker visibility](worker-visibility.md) for exact behavior and reattachment.
 The slow monitor selects work belonging to an approved plan; the foreground orchestrator selects unrelated user-requested work.
 An operator may explicitly override a selection through the CLI, but models cannot grant that override or approve their own work.
 Plain version: background jobs are available, but you must choose their model policy and authorize changes before they can run.

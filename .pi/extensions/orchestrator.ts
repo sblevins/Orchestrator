@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createWorkerObservers } from "../lib/orchestrator-observer.js";
 
 /** Local bridge only. The Python service owns scheduling and durable acknowledgments. */
 export default function (pi: ExtensionAPI) {
@@ -56,6 +57,20 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  // Never register the observer provider or spawn observers inside supervisor-owned children.
+  const observers = child ? undefined : createWorkerObservers(pi, root, request);
+  if (observers) pi.registerCommand("orchestrator-observe", {
+    description: "Reattach a local display-only worker observer in /agents (stop detaches, not cancels)",
+    handler: async (argument, ctx) => {
+      try {
+        const result = await observers.reattach(argument.trim());
+        ctx.ui.notify(result.status, result.native_attachment_confirmed ? "info" : "warning");
+      } catch {
+        ctx.ui.notify("Observer unavailable; verify the worker ID, installed pi-subagents, and owned definition. No worker was cancelled.", "warning");
+      }
+    },
+  });
+
   async function poll(ctx: ExtensionContext, version: number) {
     try {
       const response = await request("updates", {}, controller?.signal);
@@ -75,12 +90,17 @@ export default function (pi: ExtensionAPI) {
     } catch (error) {
       if (version === generation && ctx.mode === "tui") ctx.ui.setStatus("orchestrator", `Orchestrator unavailable: ${String(error).slice(0, 160)}`);
     } finally {
-      if (version === generation) timer = setTimeout(() => void poll(ctx, version), 3000);
+      if (version === generation) {
+        // UI-only reads do not wake the foreground model or change durable worker ownership.
+        await observers?.sync();
+        if (version === generation) timer = setTimeout(() => void poll(ctx, version), 3000);
+      }
     }
   }
 
   function stop() {
     generation++;
+    observers?.stop();
     if (timer) clearTimeout(timer);
     timer = undefined;
     controller?.abort();
@@ -89,10 +109,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "orchestrator", label: "Orchestrator",
-    description: "Use shared project state. Actions: projects, register_project, bind_project, status, start_plan, task, cancel_task, updates, acknowledge, record_decision, read_note, write_note, graph, workflows, request_review, pause_project, resume_project, routing_policy, request_worker, worker, workers, select_worker, refresh_worker_policy. Workers run as tracked background sub-agents, never Herder tabs or windows. Approvals remain operator-only; requesting or selecting a worker does not grant approval. Acknowledge event_ids only after addressing findings. Session identity is provided by the bridge, never by payload.",
+    description: "Use shared project state. Actions: projects, register_project, bind_project, status, start_plan, task, cancel_task, updates, acknowledge, record_decision, read_note, write_note, graph, workflows, request_review, pause_project, resume_project, routing_policy, request_worker, worker, workers, worker_view, observe_worker, select_worker, refresh_worker_policy. observe_worker {request_id} explicitly reattaches a local no-LLM observer in /agents; stopping it does not cancel the worker. Final results are supported; automatic FleetView/live partial text are not guaranteed. Workers run as tracked background sub-agents, never Herder tabs or windows. Approvals remain operator-only; requesting or selecting a worker does not grant approval. Acknowledge event_ids only after addressing findings. Session identity is provided by the bridge, never by payload.",
     parameters: Type.Object({ action: Type.String(), payload: Type.Optional(Type.Record(Type.String(), Type.Unknown())) }),
     async execute(_id, parameters, signal) {
-      const response = await request(parameters.action, parameters.payload ?? {}, signal);
+      const response = parameters.action === "observe_worker" && observers
+        ? await observers.reattach(typeof parameters.payload?.request_id === "string" ? parameters.payload.request_id : "")
+        : await request(parameters.action, parameters.payload ?? {}, signal);
       return { content: [{ type: "text", text: JSON.stringify(response) }], details: response };
     },
   });
@@ -187,6 +209,7 @@ export default function (pi: ExtensionAPI) {
       }
     }
     controller = new AbortController();
+    observers?.start(ctx);
     // Handlers are registered before polling can trigger a model turn.
     void poll(ctx, generation);
   });

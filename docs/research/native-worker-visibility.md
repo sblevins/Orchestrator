@@ -4,7 +4,7 @@ Investigated 2026-10-01 against installed Claude Code 2.1.287, Pi 0.99.2, and th
 This is a supported-interface investigation, not proof from a paid end-to-end Claude session.
 No hosted inference, user-session changes, package installation, or private harness-state modification was performed.
 
-## What the current implementation does
+## Initial finding before observer implementation
 
 Orchestrator runs durable workers independently of the foreground harness.
 Its `workers`, `worker`, and `task` operations expose those jobs through supervisor tools.
@@ -58,7 +58,7 @@ An Orchestrator-owned view can use `registerCommand`, `ctx.ui.setWidget`, `ctx.u
 It would show the actual durable workers inside Pi without new terminals, new model sessions, or installing another plugin.
 It must be clearly named as an Orchestrator worker view, not advertised as integration into the existing `/agents` fleet.
 A supported external-worker adapter in that add-on would be a separate upstream feature.
-Plain version: we can show the workers inside Pi, but cannot currently insert them into that existing add-on's list through its public interface.
+Plain version: direct attachment is unavailable, but the subsequent local-provider observer proof below provides another supported way to use the existing menu.
 
 ### Display and authority requirements
 
@@ -84,12 +84,25 @@ Actual Pi pseudoterminal probes rendered widgets and custom cards in both regula
 Those probes verify public UI primitives, not a finished worker dashboard.
 Claude evidence consists of installed version/help and fresh official documentation; native watcher UI, stop propagation, and live model usage remain untested.
 
-## Decision required before implementation
+## Selected implementation and subsequent Pi proof
 
-The exact request cannot be satisfied by direct external-worker adoption through the current public interfaces.
-Choose between explicitly labelled Claude watcher sub-agents, accepting their additional model usage and distinct cancellation semantics, or Claude background-task visibility without a separate watcher model.
-Pi can independently use an owned in-harness worker view; integrating the existing `/agents` fleet requires an additional supported adapter contract.
-Do not silently substitute a status list or a proxy agent while claiming that the external worker itself became a native sub-agent.
+The user selected Claude-only Haiku watchers and Pi's real installed sub-agent interface.
+[Worker visibility](../worker-visibility.md) documents the implemented behavior, boundaries, and remaining acceptance checks.
+Neither interface adopts the external worker process; its native entry is an explicitly labelled observer.
+
+A subsequent offline prototype proved that a public `registerProvider` local stream is inherited by plugin child sessions.
+Its stream reads saved worker status without any hosted model inference.
+Public RPC v2 spawn creates a real plugin-owned record/session visible through `/agents`, with tools disabled and no extra foreground model turn.
+The implementation now uses that approach rather than substituting an owned dashboard.
+Pi RPC spawn options deliberately omit `isBackground`: the installed plugin otherwise generates a completion nudge that triggers a foreground model turn.
+Stop aborts the local observer only, and repeated reads cannot execute, approve, or cancel the worker.
+Plain version: Pi's actual agent menu can show a helper that reads status without calling another AI.
+
+Installed-version PTY probes verified `/agents` and the final transcript, but exposed two UI limitations.
+Cold-session RPC spawn does not initialize FleetView, and the conversation viewer does not expose the unfinished assistant message until completion.
+Production-provider tests against the installed plugin verify native records, sanitized results, zero tools, no network calls, no foreground nudges, and durable work continuing after observer detach.
+Automatic FleetView and continuous unfinished text need upstream fixes; they are not claimed here.
+Claude native UI rendering and live Haiku access remain unverified without an interactive acceptance session.
 
 ## Primary references
 

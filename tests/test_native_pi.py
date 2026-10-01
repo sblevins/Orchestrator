@@ -33,6 +33,8 @@ let roleAdapter = 'claude', configuredProvider, expectedProvider = 'anthropic';
 const api = {
   on: (name, callback) => handlers.set(name, callback),
   registerTool: value => {tool = value;},
+  registerProvider() {}, registerCommand() {},
+  events: {on: () => () => {}, emit() {}},
   setActiveTools: names => {tools = names;},
   setModel: async model => {assert.equal(model.id, 'configured'); selections++; return authenticate;},
   setThinkingLevel: value => {effort = value;},
@@ -56,7 +58,7 @@ const api = {
     return {code: 0, stdout: action === 'updates' ? '[]' : '{}'};
   }
 };
-const ctx = {hasUI: true, mode: 'rpc', ui: {notify: message => notices.push(message)},
+const ctx = {hasUI: true, mode: 'rpc', ui: {notify: message => notices.push(message), setStatus() {}},
   sessionManager: {getSessionId: () => 'native-session', getBranch: () => entries},
   modelRegistry: {find(provider, id) {assert.equal(provider, expectedProvider); assert.equal(id, 'configured'); return modelExists ? {id} : undefined;}},
   abort() {throw Error('Unexpected abort');}
@@ -191,6 +193,8 @@ class NativePiTests(unittest.TestCase):
                     ROOT / ".pi/extensions/orchestrator.ts",
                     project / ".pi/extensions/orchestrator.ts",
                 )
+                shutil.copytree(ROOT / ".pi/lib", project / ".pi/lib")
+                shutil.copytree(ROOT / ".pi/agents", project / ".pi/agents")
                 (project / "bin").mkdir()
                 binary = project / "bin/orchestrator"
                 binary.write_text(CLI_RECORDER)

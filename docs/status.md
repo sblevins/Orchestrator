@@ -29,16 +29,24 @@ Pi verifies the exact model, effort, and tool allowlist without silent fallback,
 Worker tools permit reading and file edits only, not shell commands or tests.
 See [adapters](adapters.md) for execution and authentication boundaries.
 
+Frontend-specific observers add native visibility without changing worker execution ownership.
+Claude uses exactly authorized Haiku watchers; Pi uses local no-LLM observers through the installed pi-subagents public RPC.
+MCP watches are concurrent and bounded, project/session checked, and safely detached on cancellation or disconnect.
+Native stop never cancels the durable worker; acceptance remains an operator action.
+See [worker visibility](worker-visibility.md) for reattachment and installed UI limitations.
+
 ## Validation
 
-Last verified 2026-10-01: all 239 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
+Last verified 2026-10-01: all 272 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
 The suite includes real CLI worker selection/approval/acceptance, monitor-owned planned dispatch, dependency gating, signed isolated write results, and local Pi SDK tests against a loopback-only fake provider.
 The subprocess lifecycle tests also passed three consecutive runs after correcting a cleanup lock race.
 Ruff lint/format, Node syntax, and `git diff --check` passed.
 Independent review findings were reproduced and fixed: stale dependency reads, oversized valid plan seeding, and cancellation during final launch preparation.
 Policy special-file handling and failed SQLite connection cleanup also have regression coverage.
 Temporary Git fixtures are isolated from machine-wide configuration; the full suite passed with a CI-like global filter present, while production filter rejection remains tested.
-These checks do not prove paid model access, answer quality, native microphone behavior, or live Claude idle wakeup.
+The actual installed Pi/plugin creates native observer records under a network-denying, credential-free test environment with no extra foreground model turns.
+Exact Claude watcher invocation, output backpressure shutdown, lost Pi spawn replies, stale-generation responses, and detach-only cancellation have regression coverage.
+These checks do not prove paid model access, answer quality, native microphone behavior, live Claude watcher rendering, or live Claude idle wakeup.
 Plain version: the local checks passed, but real provider access and interactive behavior still need separate verification.
 
 ## Explicitly pending
@@ -46,7 +54,9 @@ Plain version: the local checks passed, but real provider access and interactive
 - A supported sanitized quota evidence adapter is unavailable, so quota-dependent candidate arrays, floors, and quota-balanced selection fail closed.
 - Operator-chosen worker profiles must be populated; there are no automatic worker model defaults.
 - Live exact-model/effort acceptance, native Claude voice/wake checks, and workload-specific quality, latency, and cost evaluation remain unverified.
-- Optional OS-managed supervisor restart and any third-party Pi orchestration plugin or shared graph UI remain outside the current implementation.
+- Pi's installed plugin does not reliably initialize automatic FleetView from RPC or show unfinished observer text; upstream UI fixes are needed.
+- Live Claude watcher UI and permission-dialog acceptance remain unverified.
+- Optional OS-managed supervisor restart and a shared graph UI remain outside the current implementation.
 
 The supervisor is single-host, not a distributed Temporal deployment, and has no installed boot service.
 Unknown work is not blindly replayed.
@@ -61,5 +71,6 @@ Quota-dependent policy must wait for supported evidence or an explicit operator 
 
 ## In flight
 
-No unfinished implementation worktree or open pull request remains in the current repository evidence.
+The `feature/native-worker-visibility` worktree contains the observer implementation and passing offline tests, awaiting final integration.
+No open pull requests were found in the current repository evidence.
 Live provider and interactive acceptance checks remain pending as listed above.

@@ -39,7 +39,7 @@ class FrontendTests(unittest.TestCase):
 
     def test_configured_read_tools_are_not_widened(self):
         self.config["roles"]["orchestrator"]["allowed_tools"] = []
-        for frontend, expected in [("claude", "AskUserQuestion"), ("pi", "orchestrator")]:
+        for frontend, expected in [("claude", "AskUserQuestion,Agent"), ("pi", "orchestrator")]:
             command = build_frontend_command(self.home, self.config, frontend, self.session)
             self.assertEqual(command[command.index("--tools") + 1], expected)
 
