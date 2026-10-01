@@ -14,7 +14,7 @@ Claude Code hooks/MCP and the owned Pi extension share this state.
 Shared supervisor settings retain resource reservations and task deadlines, without per-role dollar caps.
 The public static explainer in `docs/explainer/` retains its theme, layout, and diagram without a feedback server or private runtime data.
 
-The worker implementation in the current feature worktree enables routing and execution without supplying any worker model defaults.
+The worker implementation enables routing and execution without supplying any worker model defaults.
 Project `.orchestrator/crew-dispatch.json` policy, explicit profile selection, and authorization gates are required before dispatch.
 The slow monitor selects plan work; the foreground selects unrelated work.
 Write workers use isolated worktrees and produce signed local candidates, not automatic source-branch merges or pushes.
@@ -60,6 +60,5 @@ Quota-dependent policy must wait for supported evidence or an explicit operator 
 
 ## In flight
 
-`feature/worker-router` in `worktrees/worker-router` has completed implementation, independent review, and local validation.
-Integration and GitHub CI verification are pending.
-No other unfinished feature worktree or open pull request was found in the current repository evidence.
+No unfinished implementation worktree or open pull request remains in the current repository evidence.
+Live provider and interactive acceptance checks remain pending as listed above.
