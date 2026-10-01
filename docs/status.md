@@ -31,12 +31,13 @@ See [adapters](adapters.md) for execution and authentication boundaries.
 
 ## Validation
 
-Last verified 2026-10-01: all 238 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
+Last verified 2026-10-01: all 239 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
 The suite includes real CLI worker selection/approval/acceptance, monitor-owned planned dispatch, dependency gating, signed isolated write results, and local Pi SDK tests against a loopback-only fake provider.
 The subprocess lifecycle tests also passed three consecutive runs after correcting a cleanup lock race.
 Ruff lint/format, Node syntax, and `git diff --check` passed.
 Independent review findings were reproduced and fixed: stale dependency reads, oversized valid plan seeding, and cancellation during final launch preparation.
 Policy special-file handling and failed SQLite connection cleanup also have regression coverage.
+Temporary Git fixtures are isolated from machine-wide configuration; the full suite passed with a CI-like global filter present, while production filter rejection remains tested.
 These checks do not prove paid model access, answer quality, native microphone behavior, or live Claude idle wakeup.
 Plain version: the local checks passed, but real provider access and interactive behavior still need separate verification.
 

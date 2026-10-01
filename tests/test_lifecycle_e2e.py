@@ -33,6 +33,8 @@ class LifecycleE2ETests(unittest.TestCase):
             "ORCHESTRATOR_HOME": str(self.home),
             "ORCHESTRATOR_SESSION_ID": self.session_id,
             "PYTHONPATH": str(ROOT),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
         }
         self.cli = [sys.executable, str(ROOT / "bin/orchestrator"), "--home", str(self.home)]
 

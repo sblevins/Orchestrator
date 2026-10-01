@@ -43,7 +43,11 @@ class WorkspaceTests(unittest.TestCase):
             "commit.gpgsign": "true",
             "gpg.ssh.allowedSignersFile": str(allowed),
         }
-        environment = {"GIT_CONFIG_COUNT": str(len(settings))}
+        environment = {
+            "GIT_CONFIG_COUNT": str(len(settings)),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
         for index, (name, value) in enumerate(settings.items()):
             environment[f"GIT_CONFIG_KEY_{index}"] = name
             environment[f"GIT_CONFIG_VALUE_{index}"] = value
@@ -78,6 +82,23 @@ class WorkspaceTests(unittest.TestCase):
         git(self.source, "verify-commit", result["commit"])
         self.assertEqual(result["changed_files"], ["file.txt", "new.txt"])
         self.assertIn("worker change", Path(result["diff_path"]).read_text())
+        self.assert_source_untouched()
+
+    def test_configured_filters_and_merge_drivers_are_rejected(self):
+        count = int(os.environ["GIT_CONFIG_COUNT"])
+        for key in ("filter.example.clean", "merge.example.driver"):
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "GIT_CONFIG_COUNT": str(count + 1),
+                        f"GIT_CONFIG_KEY_{count}": key,
+                        f"GIT_CONFIG_VALUE_{count}": "false",
+                    },
+                ),
+                self.assertRaisesRegex(WorkspaceError, "filters or merge drivers"),
+            ):
+                self.prepare()
         self.assert_source_untouched()
 
     def test_dirty_source_not_stashed(self):
