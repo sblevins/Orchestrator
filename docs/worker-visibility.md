@@ -12,7 +12,8 @@ Claude uses a real background `orchestrator-watcher` sub-agent with model `haiku
 Haiku has no supported effort setting, so no pretend low-effort parameter is supplied.
 The watcher can call only `mcp__orchestrator__watch_worker`, once, and then summarize its result.
 It adds Haiku usage for that tool invocation and summary; it does not repeatedly ask a model to poll.
-The native row belongs to the Haiku watcher, while its description and returned status identify the actual worker model.
+The native row belongs to the Haiku watcher, while its description and returned status identify the configured worker model selector.
+A family selector is not a resolved version; detailed status separately records harness-reported model usage after completion.
 
 After a worker is dispatched, the foreground calls `prepare_worker_watch` and submits exactly the returned `agent` arguments to Claude's native Agent tool.
 If `agent` is null, there is already a live authorized attachment and it must not launch another.
@@ -37,7 +38,7 @@ Pi never starts the Claude watcher.
 It uses the already installed `@tintinweb/pi-subagents` plugin's public version-2 spawn protocol and an Orchestrator-owned local provider.
 That provider only reads `worker_view`; it makes no remote model calls and exposes no tools.
 The plugin owns a real observer session visible in `/agents`, not a separate dashboard labelled as native agents.
-The actual worker's model and effort appear in the observer's final transcript, separately from the local observer model label.
+The worker's configured model selector and effort appear in the observer's final transcript, separately from the local observer model label.
 Plain version: Pi shows a real sub-agent that reads job status without asking another AI to do anything.
 
 Dispatched unfinished workers attach automatically while the frontend is active, up to eight concurrent observers.

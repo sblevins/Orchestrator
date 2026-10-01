@@ -101,6 +101,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_event_update BEFORE UPDATE ON events
 CREATE TRIGGER IF NOT EXISTS immutable_event_delete BEFORE DELETE ON events
  BEGIN SELECT RAISE(ABORT,'events are immutable'); END;
 CREATE INDEX IF NOT EXISTS project_events ON events(project_id,id);
+CREATE INDEX IF NOT EXISTS task_events ON events(task_id,id);
 CREATE TABLE IF NOT EXISTS inbox(
  session_id TEXT NOT NULL REFERENCES sessions(id), event_id INTEGER NOT NULL REFERENCES events(id),
  acknowledged REAL, PRIMARY KEY(session_id,event_id));
@@ -566,11 +567,20 @@ class Store:
 
     def task(self, task_id: str) -> dict:
         with contextlib.closing(self.connect()) as database:
+            database.execute("BEGIN")
             row = database.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             if not row:
                 raise StateError("Unknown task")
             task = dict(row)
             task["config"] = json.loads(task.pop("config_json"))
+            selection = database.execute(
+                "SELECT json_extract(payload, '$.model_selection') FROM events "
+                "WHERE task_id=? AND json_type(payload, '$.model_selection')='object' "
+                "ORDER BY id DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if selection:
+                task["model_selection"] = json.loads(selection[0])
             return task
 
     def tasks(self, project_id: str | None = None, states: tuple | None = None) -> list[dict]:
@@ -673,6 +683,7 @@ class Store:
         state="succeeded",
         harness_session=None,
         cost_usd=None,
+        model_selection=None,
     ) -> bool:
         if state not in TERMINAL:
             raise StateError("Invalid terminal task state")
@@ -716,6 +727,7 @@ class Store:
                     "state": state,
                     "artifact": str(artifact.relative_to(self.home)) if text else None,
                     "error": error,
+                    **({"model_selection": model_selection} if model_selection is not None else {}),
                 },
                 task["session_id"],
                 task_id,

@@ -84,6 +84,9 @@ Model identifiers request a configuration; they do not prove availability throug
 <tr data-role="critic"><th scope="row">Independent critic</th><td>Pi adapter · GPT-6 Astra<br><code>gpt-6-astra</code><br>Provider: <span data-provider="openai-codex">openai-codex</span></td><td>high</td><td>Check the plan against the request and evidence</td></tr>
 <tr data-role="monitor"><th scope="row">Slow monitor</th><td>Claude adapter · Opus 5.5<br><code>claude-opus-5-5</code></td><td>high</td><td>Review consequential decisions and surface corrections</td></tr>
 </tbody></table></div>
+<p>Use a family such as <code>Opus</code> or <code>Fable</code> to follow its supported release, or a full model ID to request an exact version.
+Existing defaults remain pinned.
+See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/configuration.md#model-families-or-exact-versions">family resolution and catalog limits</a>.</p>
 <p><strong>Fable is only an alternative for future deep-audit evaluation, not a default.</strong>
 There are no worker model defaults.
 Workers and routing are enabled, but no dispatch profiles are populated for you.

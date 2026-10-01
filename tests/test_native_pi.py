@@ -30,13 +30,15 @@ const calls = [];
 const notices = [];
 let tools, tool, selections = 0, effort, modelExists = true, authenticate = true;
 let roleAdapter = 'claude', configuredProvider, expectedProvider = 'anthropic';
+let configuredModel = 'configured', expectedModel = 'configured';
+let catalog = [];
 const api = {
   on: (name, callback) => handlers.set(name, callback),
   registerTool: value => {tool = value;},
   registerProvider() {}, registerCommand() {},
   events: {on: () => () => {}, emit() {}},
   setActiveTools: names => {tools = names;},
-  setModel: async model => {assert.equal(model.id, 'configured'); selections++; return authenticate;},
+  setModel: async model => {assert.equal(model.id, expectedModel); selections++; return authenticate;},
   setThinkingLevel: value => {effort = value;},
   appendEntry: (customType, data) => entries.push({type: 'custom', customType, data}),
   sendMessage() {},
@@ -47,7 +49,7 @@ const api = {
       assert.equal(args[args.indexOf('--session') + 1], 'native-session');
       assert.equal(args[args.indexOf('--pid') + 1], String(process.pid));
       return {code: 0, stdout: JSON.stringify({session: {id: 'native-session'},
-        config: {roles: {orchestrator: {adapter: roleAdapter, provider: configuredProvider, model: 'configured', effort: 'low', allowed_tools: ['Read', 'Glob', 'Grep']}}},
+        config: {roles: {orchestrator: {adapter: roleAdapter, provider: configuredProvider, model: configuredModel, effort: 'low', allowed_tools: ['Read', 'Glob', 'Grep']}}},
         instructions: 'Role instructions\nPersonalization\nProject context'})};
     }
     if (args.includes('close')) return {code: 0, stdout: '{}'};
@@ -60,7 +62,10 @@ const api = {
 };
 const ctx = {hasUI: true, mode: 'rpc', ui: {notify: message => notices.push(message), setStatus() {}},
   sessionManager: {getSessionId: () => 'native-session', getBranch: () => entries},
-  modelRegistry: {find(provider, id) {assert.equal(provider, expectedProvider); assert.equal(id, 'configured'); return modelExists ? {id} : undefined;}},
+  modelRegistry: {
+    find(provider, id) {assert.equal(provider, expectedProvider); assert.equal(id, configuredModel); return modelExists ? {id, provider} : undefined;},
+    getAll: () => catalog,
+  },
   abort() {throw Error('Unexpected abort');}
 };
 extension(api);
@@ -129,6 +134,55 @@ for (const invalidProvider of [undefined, '', ' ', false]) {
   assert.equal((await handlers.get('tool_call')({toolName: 'read'}, ctx)).block, true);
   await handlers.get('session_shutdown')({}, ctx);
 }
+// Family launches omit the CLI --model, so the extension must select once.
+roleAdapter = 'claude';
+expectedProvider = 'anthropic';
+configuredModel = 'OpUs';
+expectedModel = 'claude-opus-4-10';
+modelExists = false;
+catalog = ['claude-opus-4-9', expectedModel].map(id => ({id, provider: 'anthropic'}));
+process.env.ORCHESTRATOR_HOME = process.argv[4];
+process.env.ORCHESTRATOR_SESSION_ID = 'native-session';
+entries.length = 0;
+let selectionCount = selections;
+extension(api);
+await handlers.get('session_start')({}, ctx);
+assert.equal(selections, selectionCount + 1);
+assert.equal(entries.at(-1).data.requestedModel, 'OpUs');
+assert.equal(entries.at(-1).data.resolvedModel, expectedModel);
+assert.equal(entries.at(-1).data.provider, 'anthropic');
+assert.equal(entries.at(-1).data.resolution, 'latest-known-stable-catalog');
+await handlers.get('session_shutdown')({}, ctx);
+extension(api);
+await handlers.get('session_start')({}, ctx);
+assert.equal(selections, selectionCount + 1); // Reload keeps a manual /model choice.
+await handlers.get('session_shutdown')({}, ctx);
+// A resumed session in another process must resolve again against its current catalog.
+entries.at(-1).data.pid = -1;
+extension(api);
+await handlers.get('session_start')({}, ctx);
+assert.equal(selections, selectionCount + 2);
+await handlers.get('session_shutdown')({}, ctx);
+// Availability never downgrades to the authenticated older entry.
+entries.length = 0;
+authenticate = false;
+selectionCount = selections;
+extension(api);
+await handlers.get('session_start')({}, ctx);
+assert.equal(selections, selectionCount + 1);
+assert.deepEqual(tools, []);
+assert(notices.some(message => message.includes('Authentication unavailable') && message.includes(expectedModel)));
+assert.equal(entries.length, 0);
+await handlers.get('session_shutdown')({}, ctx);
+// Exact launcher selections remain the launcher's responsibility.
+authenticate = true;
+configuredModel = 'claude-opus-4-9';
+selectionCount = selections;
+extension(api);
+await handlers.get('session_start')({}, ctx);
+assert.equal(selections, selectionCount);
+assert(tools.includes('orchestrator'));
+await handlers.get('session_shutdown')({}, ctx);
 console.log('native lifecycle passed');
 """
 
@@ -184,6 +238,7 @@ class NativePiTests(unittest.TestCase):
         for configured_model in (
             "claude-native-offline-fixture",
             "claude-nonexistent-orchestrator-model",
+            "OpUs",
         ):
             with self.subTest(model=configured_model), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary)
@@ -226,7 +281,9 @@ class NativePiTests(unittest.TestCase):
                                     "api": "anthropic-messages",
                                     "apiKey": "offline-test-only",
                                     "models": [
-                                        {"id": "claude-native-offline-fixture", "reasoning": True}
+                                        {"id": "claude-native-offline-fixture", "reasoning": True},
+                                        {"id": "claude-opus-999-9", "reasoning": True},
+                                        {"id": "claude-opus-999-10", "reasoning": True},
                                     ],
                                 }
                             }
@@ -267,8 +324,11 @@ class NativePiTests(unittest.TestCase):
                 try:
                     response, observed = request({"id": "state", "type": "get_state"})
                     self.assertTrue(response["success"], response)
-                    if configured_model == "claude-native-offline-fixture":
-                        self.assertEqual(response["data"]["model"]["id"], configured_model)
+                    if configured_model in ("claude-native-offline-fixture", "OpUs"):
+                        expected_model = (
+                            "claude-opus-999-10" if configured_model == "OpUs" else configured_model
+                        )
+                        self.assertEqual(response["data"]["model"]["id"], expected_model, observed)
                         self.assertEqual(response["data"]["thinkingLevel"], "low")
                     else:
                         self.assertTrue(

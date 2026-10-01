@@ -58,7 +58,7 @@ function workerFrom(value: any, expectedId?: string): Worker {
 function snapshot(worker: Worker): string {
   const profile = worker.profile;
   return `Worker ${observerText(worker.request_id)}: ${observerText(worker.label ?? "")}\n` +
-    `Actual worker: ${observerText(profile?.harness ?? "unknown")} / ${observerText(profile?.provider ?? "unknown")} / ` +
+    `Configured worker: ${observerText(profile?.harness ?? "unknown")} / ${observerText(profile?.provider ?? "unknown")} / ` +
     `${observerText(profile?.model ?? "unknown")} / effort ${observerText(profile?.effort ?? "unknown")}\n` +
     `Request: ${observerText(worker.state)}; task: ${observerText(worker.task_state ?? "unknown")}; ` +
     `accepted: ${worker.accepted ? "yes" : "no"}.\n`;

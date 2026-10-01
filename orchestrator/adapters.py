@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from orchestrator.config import ConfigurationError, role_config, validate_executor
+from orchestrator.models import normalize_model
 
 
 class AdapterError(ValueError):
@@ -59,7 +60,7 @@ def build_command(
             "--output-format",
             "json",
             "--model",
-            settings["model"],
+            normalize_model(settings["model"]),
             "--effort",
             settings["effort"],
             "--permission-mode",
@@ -527,4 +528,22 @@ def parse_result(adapter: str, stdout: str, returncode: int) -> dict:
         cost = _cost(terminal.get("total_cost_usd"))
     else:
         cost = None
-    return {"text": message, "session_id": session_id, "cost_usd": cost}
+    result = {"text": message, "session_id": session_id, "cost_usd": cost}
+    if adapter == "claude" and "modelUsage" in terminal:
+        usage = terminal["modelUsage"]
+        if (
+            not isinstance(usage, dict)
+            or len(usage) > 32
+            or any(
+                not isinstance(model, str)
+                or not model
+                or len(model) > 256
+                or any(ord(character) < 32 for character in model)
+                or not isinstance(details, dict)
+                for model, details in usage.items()
+            )
+        ):
+            raise AdapterError("invalid Claude modelUsage metadata")
+        # Includes internal pipeline/sub-agent calls, not necessarily one primary model.
+        result["reported_models"] = sorted(usage)
+    return result

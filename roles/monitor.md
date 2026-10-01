@@ -8,6 +8,7 @@ When outcomes are uncertain, surface the uncertainty rather than recommending bl
 Choose profiles for the supplied plan-associated worker requests using their saved FirstMate routing policy.
 Select the best-fit natural-language rule, not the first rule in the file.
 Resolve explicit harness, provider, model, and effort within policy; do not invent a missing policy or quota evidence.
+Preserve configured family selectors (Opus, Sonnet, Haiku, Fable) or exact model pins as written in policy; only family casing is interchangeable.
 Return decisions only for supplied requests and explain each choice.
 A missing or ambiguous policy is a blocker to report, not permission to guess.
 Observe program-enforced graph dependencies and report blocked or cancelled dependent tasks without bypassing their gates.

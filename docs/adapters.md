@@ -17,7 +17,8 @@ Write workers are not granted the source checkout as an additional directory.
 `--settings '{}'` suppresses the installed wrapper's global model pin, while `--setting-sources ''` excludes inherited settings and recursive orchestration hooks.
 `--strict-mcp-config` excludes inherited MCP servers, and `--disable-slash-commands` disables skills.
 These controls are not an operating-system sandbox or a bypass of managed policy.
-Claude specialist resume uses an explicit saved conversation ID through `--resume`, with the same model, effort, and permissions.
+Claude specialist resume uses an explicit saved conversation ID through `--resume`, with the same model selector, effort, and permissions.
+The selector may be an exact ID or a canonical native family alias; a family can resolve differently on a later launch.
 Worker invocations start fresh instead of inheriting a conversation.
 Plain version: workers get only the listed file tools, but this does not protect against other programs running as the same user.
 
@@ -66,6 +67,8 @@ Malformed JSON, duplicate keys, explicit failures, missing completion, and confl
 Claude requires terminal `type=result`, `subtype=success`, literal `is_error=false`, and a consistent session ID.
 If present, `structured_output` is serialized into `text`; otherwise the terminal result must contain nonempty text.
 Optional Claude dollar cost must be finite and nonnegative; missing cost remains unknown.
+Optional `modelUsage` contributes a bounded `reported_models` list, kept separately from the requested selector in the fenced completion event.
+This list can include auxiliary calls and is not evidence of one uniquely identified primary model.
 Its resumed-session cost scope is not established, so reported values must not be summed as verified per-turn spending.
 
 Pi requires a verified 0.99.2 preflight, a diagnostic session header, matched message and tool events, a successful final assistant message, and settlement with no later activity.

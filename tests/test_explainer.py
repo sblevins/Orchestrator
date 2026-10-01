@@ -81,7 +81,9 @@ class ExplainerTests(unittest.TestCase):
                 else:
                     self.assertEqual(urlparse(link).scheme, "https")
                     if link.startswith(repository_prefix):
-                        self.assertTrue((ROOT / link.removeprefix(repository_prefix)).is_file())
+                        # A document fragment selects a section, not part of its filename.
+                        relative_path = urlparse(link.removeprefix(repository_prefix)).path
+                        self.assertTrue((ROOT / relative_path).is_file())
 
     def test_core_models_and_efforts_match_tracked_defaults(self):
         configuration = tomllib.loads((ROOT / "config" / "default.toml").read_text())

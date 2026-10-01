@@ -12,6 +12,7 @@ from pathlib import Path
 
 from orchestrator import adapters
 from orchestrator.config import ConfigurationError, validate_executor
+from orchestrator.models import model_family, normalize_model
 
 MAX_OUTPUT = 4 * 1024 * 1024
 MAX_FILES = 1000
@@ -105,9 +106,9 @@ def build_worker_command(config, profile, mode, prompt, cwd, output_path, *, pro
         raise adapters.AdapterError(str(error)) from error
     tools = ["Read", "Glob", "Grep"] + (["Edit", "Write"] if mode == "write" else [])
     harness = profile.get("harness")
-    model = profile["model"]
+    model = normalize_model(profile["model"])
     provider = profile.get("provider")
-    anthropic = provider == "anthropic" or "claude" in model.lower()
+    anthropic = provider == "anthropic" or "claude" in model.lower() or model_family(model)
     if harness == "pi":
         if anthropic or not provider:
             raise adapters.AdapterError("Pi requires an explicit non-Anthropic provider")

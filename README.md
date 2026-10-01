@@ -51,6 +51,9 @@ Tracked defaults live in `config/default.toml`.
 Private `config/local.toml` overrides them; `config/projects/PROJECT_ID.toml` adds project preferences.
 If you have no private configuration yet, run `./bin/orchestrator config init`.
 Edit each role's model and effort without changing Python code.
+Use `model = "Opus"` or `model = "Fable"` to follow that supported family, or an exact ID such as `claude-opus-5-5` to keep a version pin.
+`Sonnet` and `Haiku` also work; family names are case-insensitive and existing pins stay unchanged.
+See [model families](docs/configuration.md#model-families-or-exact-versions) for Claude/Pi resolution and catalog limits.
 Shared background settings handle deadlines and machine-resource reservations; roles do not need individual timeout, CPU, or memory parameters.
 There is no per-role dollar budget or spending-cap parameter.
 Model identifiers are requests, not a guarantee of account access or measured superiority.

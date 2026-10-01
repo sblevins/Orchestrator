@@ -26,7 +26,10 @@ def _session(database, session_id, *, claude=False):
 def _rows(database, project_id, request_id=None, offset=0):
     columns = (
         "w.id,w.project_id,w.state,w.mode,w.plan_id,w.node_id,w.task_id,w.created,"
-        "w.brief,w.profile_json,w.result_json,t.state AS task_state,t.cancel_requested"
+        "w.brief,w.profile_json,w.result_json,t.state AS task_state,t.cancel_requested,"
+        "(SELECT json_extract(e.payload, '$.model_selection') FROM events e "
+        "WHERE e.task_id=w.task_id AND json_type(e.payload, '$.model_selection')='object' "
+        "ORDER BY e.id DESC LIMIT 1) AS model_selection_json"
     )
     sql = f"SELECT {columns} FROM worker_requests w LEFT JOIN tasks t ON t.id=w.task_id "
     if request_id is not None:
@@ -75,6 +78,16 @@ def _view(row, observer, *, detail=False):
         "can_request_task_cancel": not observer and bool(row["task_id"]) and not done,
         "observation_only": True,
     }
+    if detail and row["model_selection_json"]:
+        selection = json.loads(row["model_selection_json"])
+        view["model_selection"] = {
+            "requested_model": _display_text(selection["requested_model"], 256),
+            "family": selection["family"],
+            "reported_models": [
+                _display_text(model, 256) for model in selection["reported_models"][:32]
+            ],
+            "reported_models_scope": "harness usage, including any internal or sub-agent calls",
+        }
     # Deliberately omit task prompts, configuration, credentials, raw output and runner errors.
     # Reports are untrusted worker data, not instructions or proof of operator acceptance.
     if detail and row["state"] in {"candidate", "accepted"} and row["result_json"]:

@@ -15,6 +15,8 @@ import stat
 from copy import deepcopy
 from pathlib import Path
 
+from .models import model_family, normalize_model
+
 
 class RoutingError(ValueError):
     """A policy or selection needs an explicit configuration/operator action."""
@@ -83,7 +85,10 @@ def _profiles(value, context):
             _provider(profile["provider"], f"{location}.provider")
         if "floor" in profile:
             _floor(profile["floor"], f"{location}.floor")
-        axes = tuple(profile.get(key) for key in ("harness", "provider", "model", "effort"))
+        axes = tuple(
+            normalize_model(profile.get(key)) if key == "model" else profile.get(key)
+            for key in ("harness", "provider", "model", "effort")
+        )
         if axes in seen:
             raise RoutingError(
                 f"{context} contains duplicate profile axes; remove the duplicate candidate"
@@ -233,7 +238,7 @@ def _execution_axes(profile):
             f"Effort {profile['effort']!r} is unsupported by {harness}; choose a supported effort "
             "explicitly. Effort will not be downgraded"
         )
-    claude_model = "claude" in profile["model"].lower()
+    claude_model = "claude" in profile["model"].lower() or model_family(profile["model"])
     provider = profile.get("provider")
     if harness == "pi":
         if provider is None:
@@ -319,7 +324,12 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
         configured = candidates[candidate_index]
         profile = {"harness": configured["harness"]}
         for axis in ("harness", "model", "effort", "provider"):
-            if axis in configured and axis in choice and configured[axis] != choice[axis]:
+            configured_value = configured.get(axis)
+            chosen_value = choice.get(axis)
+            if axis == "model":
+                configured_value = normalize_model(configured_value)
+                chosen_value = normalize_model(chosen_value)
+            if axis in configured and axis in choice and configured_value != chosen_value:
                 raise RoutingError(
                     f"choice.{axis} conflicts with the configured profile; request an operator override"
                 )
@@ -350,6 +360,7 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
             )
     if "provider" in choice:
         profile["provider"] = choice["provider"]
+    profile["model"] = normalize_model(profile["model"])
     _execution_axes(profile)
     return {
         **profile,

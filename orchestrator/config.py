@@ -6,6 +6,8 @@ import tomllib
 from copy import deepcopy
 from pathlib import Path
 
+from .models import model_family
+
 
 class ConfigurationError(ValueError):
     """Configuration cannot safely be used."""
@@ -80,15 +82,18 @@ def validate_executor(settings: dict, context="profile") -> None:
     _text(model, f"{context}.model")
     provider = settings.get("provider")
     if adapter == "claude":
-        if provider not in (None, "anthropic") or not model.lower().startswith("claude-"):
+        if provider not in (None, "anthropic") or not (
+            model.lower().startswith("claude-") or model_family(model)
+        ):
             _fail(
-                f"{context}: Claude Code is reserved for Anthropic claude-* models; use Pi otherwise"
+                f"{context}: Claude Code requires an Anthropic claude-* ID or family "
+                "(opus, sonnet, haiku, fable); use Pi otherwise"
             )
     elif adapter == "pi":
         _text(provider, f"{context}.provider")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", provider):
             _fail(f"{context}.provider must be a provider identifier")
-        if "anthropic" in provider.lower() or "claude" in model.lower():
+        if "anthropic" in provider.lower() or "claude" in model.lower() or model_family(model):
             _fail(f"{context}: use Claude Code for Anthropic models, not Pi")
     else:
         _fail(f"{context}: use claude for Anthropic models or pi with an explicit provider")

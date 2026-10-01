@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createWorkerObservers } from "../lib/orchestrator-observer.js";
+import { isAnthropicFamily, resolveForegroundModel } from "../lib/model-families.js";
 
 /** Local bridge only. The Python service owns scheduling and durable acknowledgments. */
 export default function (pi: ExtensionAPI) {
@@ -181,16 +182,19 @@ export default function (pi: ExtensionAPI) {
         entry.customType === "orchestrator-bootstrap" &&
         (entry.data as { pid?: number; sessionId?: string })?.pid === process.pid &&
         (entry.data as { sessionId?: string })?.sessionId === sessionId);
-      if (!launched && !initialized) {
-        const provider = role.adapter === "claude" ? "anthropic" :
-          role.adapter === "pi" && typeof role.provider === "string" && role.provider.trim() ? role.provider : undefined;
-        const model = provider && ctx.modelRegistry.find(provider, role.model);
-        if (!model) throw new Error(`Configured Orchestrator model not found: ${provider || role.adapter}/${role.model}`);
-        if (!(await pi.setModel(model))) throw new Error(`Authentication unavailable for Orchestrator model: ${provider}/${role.model}`);
+      const provider = role.adapter === "claude" ? "anthropic" :
+        role.adapter === "pi" && typeof role.provider === "string" && role.provider.trim() ? role.provider : undefined;
+      const familyRequested = provider === "anthropic" && isAnthropicFamily(role.model);
+      if ((!launched || familyRequested) && !initialized) {
+        if (!provider) throw new Error(`Configured Orchestrator model not found: ${role.adapter}/${role.model}`);
+        const model = resolveForegroundModel(ctx.modelRegistry, provider, role.model);
+        if (!(await pi.setModel(model))) throw new Error(`Authentication unavailable for Orchestrator model: ${provider}/${model.id} (requested ${role.model})`);
         const efforts = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
         if (!efforts.includes(role.effort)) throw new Error(`Invalid Orchestrator effort: ${role.effort}`);
         pi.setThinkingLevel(role.effort);
-        pi.appendEntry("orchestrator-bootstrap", { pid: process.pid, sessionId });
+        pi.appendEntry("orchestrator-bootstrap", { pid: process.pid, sessionId,
+          provider, requestedModel: role.model, resolvedModel: model.id,
+          resolution: model.id === role.model ? "exact" : "latest-known-stable-catalog" });
       }
       ready = true;
       pi.setActiveTools([...allowedTools]);

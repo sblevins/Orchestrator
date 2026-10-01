@@ -85,8 +85,8 @@ Every role's model and effort can be overridden privately.
 
 The orchestrator defaults to `claude-sonnet-5-5` with low effort; planner and monitor default to `claude-opus-5-5` with high effort.
 The critic defaults to `gpt-6-astra` through Pi with provider `openai-codex` and high effort.
-Model identifiers are passed unchanged, without a fixed model catalog.
-Claude Code accepts Anthropic `claude-*` names; other models use Pi with an explicit `provider` setting.
+Exact model identifiers are passed unchanged.
+Claude Code also accepts case-insensitive family names `Opus`, `Sonnet`, `Haiku`, and `Fable`; other models use Pi with an explicit `provider` setting.
 These requested identifiers are not a claim of provider availability; configure the exact identifier your provider supports.
 Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Pi efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
 No model-specific effort assumptions or silent fallbacks are applied.
@@ -111,6 +111,51 @@ All additional arguments are rejected because the adapter owns sandbox, permissi
 Known dangerous bypass spellings are also rejected in the executable entry.
 Executable paths are trusted administrator selections; validation cannot prove an arbitrary executable is safe.
 There is no shell interpolation and no automatic approval setting.
+
+## Model families or exact versions
+
+Set `model` to a family name to follow the harness-supported family release, or to a full model ID to request a particular version.
+The supported bare families are `Opus`, `Sonnet`, `Haiku`, and `Fable`, in any letter case.
+No special `latest` setting or version table needs updating in this repository.
+Existing exact defaults and private pins are not migrated automatically.
+
+```toml
+[roles.planner]
+model = "Opus"
+effort = "high"
+
+[roles.monitor]
+model = "Fable"
+effort = "high"
+
+# Or pin a version instead:
+# [roles.planner]
+# model = "claude-opus-5-5"
+```
+
+Claude execution passes the canonical native alias, for example `opus`, to Claude Code.
+Claude selects its current provider/account-supported alias target; installed Claude version, organization restrictions, gateways, and `ANTHROPIC_DEFAULT_*_MODEL` overrides can affect that target.
+Orchestrator does not claim an alias bypasses those controls or guarantees the newest release worldwide.
+Keep Claude updated when you want new native alias targets, and use an exact ID when reproducibility matters.
+The same aliases work in worker policy `model` fields with `harness: "claude"`.
+Pi background executors still reject Anthropic families; choosing a family never changes the required execution harness.
+Plain version: `Opus` follows Claude's supported Opus choice; `claude-opus-5-5` keeps requesting that named version.
+
+When the foreground runs in Pi with an Anthropic orchestrator role, its owned extension chooses the newest stable family member in Pi's loaded `anthropic` catalog.
+It compares version numbers numerically, so `4-10` is newer than `4-9`, and uses valid release-date suffixes to order snapshots within a version.
+It excludes preview/context variants and unrelated providers, and rejects missing or equally ranked ambiguous matches rather than guessing.
+A full exact catalog ID always wins, including an explicitly selected preview or custom ID.
+Authentication failure stops startup rather than choosing an older model.
+Pi's saved catalog can lag new releases; update its catalog or configure an available exact ID if necessary.
+A family is selected once at startup; extension reload preserves subsequent manual model changes.
+Starting a new process resolves the family again.
+Plain version: Pi picks the newest matching model it knows, not whichever name happens to sort last.
+
+Pi bootstrap entries record requested and resolved foreground IDs.
+Claude task completion records `model_selection.requested_model`, `family`, and any `reported_models` from the harness's `modelUsage` metadata, available through `task` and detailed `worker_view`.
+That usage list can contain internal/sub-agent models or resumed-session totals, so it is not presented as a single verified primary model.
+Missing usage metadata means the actual models are unknown, not inferred from the alias.
+This feature adds no paid model-resolution call and does not verify live model entitlement or provider-side remapping.
 
 ## Frontends and worker routing
 

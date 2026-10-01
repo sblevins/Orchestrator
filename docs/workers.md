@@ -30,9 +30,14 @@ Missing policy also blocks selection, including operator overrides, until a vali
 Policy contains `rules` and/or an optional `default` profile.
 Each rule has natural-language `when` text and a `use` profile or candidate array; optional fields include `why`, `approval: "captain"`, `min_confidence`, `floor`, and `select: "quota-balanced"`.
 A profile names a `harness` and may constrain `provider`, `model`, and `effort`.
-A selection supplies the exact model and effort, a rationale, the zero-based rule index or `"default"`, and a candidate index when needed.
+A selection supplies an explicit model ID or supported family name and effort, a rationale, the zero-based rule index or `"default"`, and a candidate index when needed.
 The selector chooses the best-fitting rule; deterministic validation does not interpret task prose or choose omitted model axes.
 Declared model or effort constraints cannot silently be changed.
+For Claude profiles, `"model": "Opus"` or `"model": "Fable"` follows the native family alias; `Sonnet` and `Haiku` also work.
+Family casing is ignored when comparing a choice to policy, but a family and an exact version are not interchangeable without an operator override.
+The saved profile fixes the selector; a family selector can resolve to a newer version on a later launch.
+Exact IDs remain unchanged, and policy content/digests are not rewritten by normalization.
+See [model families](configuration.md#model-families-or-exact-versions) for provider and catalog limits.
 Maximum effort requires an explicit policy preference or operator override and must still be supported by the executor.
 Plain version: the model explains which configured rule fits, and the program checks that its choice follows that rule.
 

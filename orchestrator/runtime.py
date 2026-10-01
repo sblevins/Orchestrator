@@ -211,6 +211,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
     child_record = {}
     try:
         from .adapters import build_command, parse_result
+        from .models import model_family
 
         config = task["config"]
         workspace = None
@@ -367,6 +368,14 @@ def run_task(home: Path, task_id: str, token: str) -> int:
             text=values["text"],
             harness_session=values.get("session_id"),
             cost_usd=values.get("cost_usd"),
+            model_selection={
+                "requested_model": role["model"],
+                "family": model_family(role["model"]),
+                "reported_models": values.get("reported_models", []),
+                "reported_models_scope": "harness usage, including any internal or sub-agent calls",
+            }
+            if role["adapter"] == "claude"
+            else None,
         ):
             return 1
         return 0 if store.task(task_id)["state"] == "succeeded" else 1

@@ -120,7 +120,9 @@ elif role == 'critic':
     output = {'verdict': 'approved', 'findings': []}
 else:
     output = json.loads(Path(os.environ['ORCH_TEST_WORKFLOW']).read_text())
-print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':str(uuid.uuid4()),'result':json.dumps(output),'total_cost_usd':0.001}))
+requested_model = sys.argv[sys.argv.index('--model') + 1]
+reported_model = {'opus': 'claude-opus-9-2', 'fable': 'claude-fable-9-1'}.get(requested_model, requested_model)
+print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':str(uuid.uuid4()),'result':json.dumps(output),'total_cost_usd':0.001, 'modelUsage': {reported_model: {}, 'claude-haiku-8-1': {}}}))
 """)
         executable.chmod(0o700)
         registry = self.home / "machine-resources"
@@ -197,8 +199,18 @@ os.execv(args[0],args)
             time.sleep(0.02)
 
     def test_worker_runs_as_background_task_and_requires_acceptance(self):
+        self._background_worker_flow("claude-fixture-worker", "claude-fixture-worker")
+
+    def test_family_roles_and_worker_route_through_real_cli_and_runner(self):
+        self._background_worker_flow("OpUs", "opus")
+
+    def _background_worker_flow(self, policy_model, selected_model):
         self.install_fake_harnesses()
         self.addCleanup(self.cleanup_service)
+        if policy_model == "OpUs":
+            with (self.home / "config/local.toml").open("a") as settings:
+                settings.write('[roles.planner]\nmodel="Opus"\n[roles.monitor]\nmodel="Fable"\n')
+            self.command("config", "validate")
         policy = self.project / ".orchestrator" / "crew-dispatch.json"
         policy.parent.mkdir()
         policy.write_text(
@@ -206,7 +218,7 @@ os.execv(args[0],args)
                 {
                     "default": {
                         "harness": "claude",
-                        "model": "claude-fixture-worker",
+                        "model": policy_model,
                         "effort": "low",
                     }
                 }
@@ -238,13 +250,13 @@ os.execv(args[0],args)
                 "request_id": worker["id"],
                 "choice": {
                     "rule": "default",
-                    "model": "claude-fixture-worker",
+                    "model": selected_model,
                     "effort": "low",
                     "rationale": "The configured default covers unrelated inspection",
                 },
             },
         )
-        self.assertEqual(selected["profile"]["model"], "claude-fixture-worker")
+        self.assertEqual(selected["profile"]["model"], selected_model)
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             worker = operation("worker", {"request_id": worker["id"]})
@@ -256,6 +268,12 @@ os.execv(args[0],args)
         self.assertEqual(task["state"], "succeeded")
         self.assertIsNotNone(task["runner_pid"])
         self.assertEqual(task["role"], "worker")
+        expected_model = "claude-opus-9-2" if selected_model == "opus" else selected_model
+        self.assertEqual(task["model_selection"]["requested_model"], selected_model)
+        self.assertIn(expected_model, task["model_selection"]["reported_models"])
+        self.assertIn("claude-haiku-8-1", task["model_selection"]["reported_models"])
+        view = operation("worker_view", {"request_id": worker["id"]})["worker"]
+        self.assertEqual(view["model_selection"], task["model_selection"])
         self.assertEqual(len([item for item in self.store.tasks() if item["role"] == "worker"]), 1)
         self.command("accept-worker", worker["id"], "--reason", "Reviewed the saved fixture result")
         accepted = operation("worker", {"request_id": worker["id"]})
