@@ -8,6 +8,7 @@ import fcntl
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -86,6 +87,28 @@ def parser() -> argparse.ArgumentParser:
     configuration = commands.add_parser("config")
     configuration.add_argument("config_command", choices=("show", "validate", "init"))
     configuration.add_argument("--project")
+    routing = commands.add_parser(
+        "routing", help="Configure project worker routing without model defaults"
+    )
+    routing.add_argument("routing_command", choices=("init", "show", "validate"))
+    routing.add_argument("--project", required=True)
+    for name in ("approve-worker", "accept-worker"):
+        worker_action = commands.add_parser(name, help="Operator-only worker authorization")
+        worker_action.add_argument("request_id")
+        worker_action.add_argument("--reason", required=True)
+    override = commands.add_parser(
+        "override-worker", help="Operator-only concrete worker selection"
+    )
+    override.add_argument("request_id")
+    choice_source = override.add_mutually_exclusive_group(required=True)
+    choice_source.add_argument("--choice", help="Concrete profile and rationale as JSON")
+    choice_source.add_argument(
+        "--choice-file", type=Path, help="Private JSON file containing the choice"
+    )
+    approve_node = commands.add_parser("approve-node", help="Complete an approval-only graph node")
+    approve_node.add_argument("plan_id")
+    approve_node.add_argument("node_id")
+    approve_node.add_argument("--reason", required=True)
     commands.add_parser("doctor")
     commands.add_parser("backup")
     service = commands.add_parser("service")
@@ -111,6 +134,99 @@ def parser() -> argparse.ArgumentParser:
     graph = commands.add_parser("graph")
     graph.add_argument("plan_id")
     return root
+
+
+def _initialize_routing(project_root: Path) -> Path:
+    # Directory descriptors prevent swapping the policy directory for a symlink.
+    with contextlib.ExitStack() as stack:
+        root_fd = os.open(project_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, root_fd)
+        try:
+            os.mkdir(".orchestrator", mode=0o700, dir_fd=root_fd)
+        except FileExistsError:
+            pass
+        directory_fd = os.open(
+            ".orchestrator", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
+        )
+        stack.callback(os.close, directory_fd)
+        try:
+            policy_fd = os.open(
+                "crew-dispatch.json",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory_fd,
+            )
+        except FileExistsError as error:
+            raise StateError("Worker policy already exists; refusing to overwrite it") from error
+        with os.fdopen(policy_fd, "w", encoding="utf-8") as policy_file:
+            policy_file.write(encode({"rules": []}) + "\n")
+            policy_file.flush()
+            os.fsync(policy_file.fileno())
+        os.fsync(directory_fd)
+    return project_root / ".orchestrator" / "crew-dispatch.json"
+
+
+def _private_choice(path: Path) -> dict:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "r", encoding="utf-8") as choice_file:
+        metadata = os.fstat(choice_file.fileno())
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_mode & 0o077
+        ):
+            raise StateError(
+                "Choice file must be a private regular file owned by this user (mode 0600)"
+            )
+        text = choice_file.read(1_048_577)
+        if len(text) > 1_048_576:
+            raise StateError("Choice file exceeds 1 MiB")
+        return json.loads(text)
+
+
+def _routing(home, store, arguments):
+    from .routing import RoutingError, load_policy, resolve_selection
+
+    project = store.project(arguments.project)
+    if arguments.routing_command == "init":
+        return {
+            "created": str(_initialize_routing(Path(project["root"]))),
+            "routable": False,
+            "configuration_required": True,
+            "message": "No worker profiles supplied. Configure rules before selecting workers.",
+        }
+    loaded = load_policy(home, Path(project["root"]))
+    if arguments.routing_command == "show":
+        return loaded
+    policy = loaded["policy"]
+    profiles = [(index, rule["use"]) for index, rule in enumerate(policy.get("rules", []))]
+    if "default" in policy:
+        profiles.append(("default", policy["default"]))
+    executable_profiles = 0
+    blockers = []
+    for rule, choices in profiles:
+        for candidate, profile in enumerate(choices if isinstance(choices, list) else [choices]):
+            choice = {
+                "rule": rule,
+                "candidate": candidate,
+                "model": profile.get("model"),
+                "effort": profile.get("effort"),
+                "rationale": "Operator policy validation",
+            }
+            try:
+                resolve_selection(policy, choice)
+                executable_profiles += 1
+            except RoutingError as error:
+                blockers.append({"rule": rule, "candidate": candidate, "reason": str(error)})
+    return {
+        **loaded,
+        "valid": True,
+        "routable": executable_profiles > 0,
+        "executable_profiles": executable_profiles,
+        "blockers": blockers,
+        "message": "Schema validation does not prove model access or authorize execution. "
+        "Workers still need an explicit selection and any required approval.",
+    }
 
 
 def _read_hook_input() -> dict:
@@ -211,10 +327,16 @@ def doctor(home: Path) -> dict:
         "machine_resources": shutil.which("machine-resources"),
         "service": service,
         "role_settings": {
-            name: {key: role[key] for key in ("adapter", "model", "effort")}
+            name: {
+                key: role[key] for key in ("adapter", "provider", "model", "effort") if key in role
+            }
             for name, role in config["roles"].items()
         },
-        "worker_router": "disabled by design",
+        "worker_router": {
+            "enabled": config["routing"]["enabled"],
+            "workers_enabled": config["workers"]["enabled"],
+            "configuration_required": "Project worker policy and explicit profile selection are required",
+        },
         "third_party_orchestration_plugins": "not selected or installed",
         "model_access": "not probed; executable presence does not establish access to a model",
         "claude_delivery": "bounded asyncRewake hooks; preview channels require explicit --channels",
@@ -294,7 +416,7 @@ def start(home: Path, arguments) -> int:
         ]
         print(
             f"Orchestrator session {session_id}; project {arguments.project or 'select in conversation'}. "
-            "Worker routing is disabled.",
+            "Worker routing requires configured project policy and an explicit profile selection.",
             file=sys.stderr,
         )
         return subprocess.call(managed, cwd=home, env=environment)
@@ -361,7 +483,13 @@ def main(argv=None) -> int:
                 emit(config)
             elif arguments.config_command == "validate":
                 emit(
-                    {"valid": True, "roles": list(config["roles"]), "worker_router_enabled": False}
+                    {
+                        "valid": True,
+                        "roles": list(config["roles"]),
+                        "worker_router_enabled": config["routing"]["enabled"],
+                        "workers_enabled": config["workers"]["enabled"],
+                        "worker_policy": "Project policy configuration and explicit selection required",
+                    }
                 )
             else:
                 path = home / "config" / "local.toml"
@@ -384,7 +512,32 @@ def main(argv=None) -> int:
                 emit(service_status(home))
         else:
             store = Store(home)
-            if command == "project":
+            if command == "routing":
+                emit(_routing(home, store, arguments))
+            elif command in {"approve-worker", "accept-worker", "override-worker", "approve-node"}:
+                from .runtime import ensure_supervisor
+                from .workers import WorkerService
+
+                workers = WorkerService(store)
+                if command == "approve-worker":
+                    result = workers.approve(arguments.request_id, arguments.reason)
+                elif command == "accept-worker":
+                    result = workers.accept(arguments.request_id, arguments.reason)
+                elif command == "approve-node":
+                    result = workers.approve_node(
+                        arguments.plan_id, arguments.node_id, arguments.reason
+                    )
+                else:
+                    choice = (
+                        _private_choice(arguments.choice_file)
+                        if arguments.choice_file
+                        else json.loads(arguments.choice)
+                    )
+                    if not isinstance(choice, dict):
+                        raise StateError("Worker choice must be a JSON object")
+                    result = workers.override(arguments.request_id, choice)
+                emit({"result": result, "service": ensure_supervisor(home)})
+            elif command == "project":
                 emit(
                     store.add_project(arguments.project_id, arguments.path)
                     if arguments.project_command == "add"
@@ -414,7 +567,18 @@ def main(argv=None) -> int:
                 emit({"backup": str(store.backup())})
             elif command == "approve":
                 store.approve_plan(arguments.plan_id)
-                emit({"approved": arguments.plan_id, "workers_enabled": False})
+                from .runtime import ensure_supervisor
+
+                plan = store.plan(arguments.plan_id)
+                config = load_config(home, plan["project_id"])
+                emit(
+                    {
+                        "approved": arguments.plan_id,
+                        "workers_enabled": config["workers"]["enabled"],
+                        "worker_policy": "Configured policy and monitor selection required; captain rules need separate approval",
+                        "service": ensure_supervisor(home),
+                    }
+                )
             elif command == "resolve-hold":
                 store.resolve_hold(arguments.hold_id, arguments.reason)
                 emit({"resolved": arguments.hold_id})

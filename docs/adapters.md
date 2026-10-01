@@ -1,83 +1,86 @@
-# Specialist subprocess adapters
+# Supervised execution adapters
 
-`orchestrator.adapters.build_command(config, role, prompt, cwd, output_path, session_id=None, *, project_root=None, stdin_prompt=False)` returns an argv list, without launching a process or writing a file.
-It validates configuration through `role_config` and raises `AdapterError` on invalid configuration or arguments.
-Runtime appends the role instructions to the prompt before calling it.
-`session_id` means resume that harness conversation, never select the latest conversation or invent a supervisor ID.
-Fresh invocations let the harness allocate its ID.
-Plain version: this module prepares a command and checks its answer; it does not run or save the job.
+`orchestrator.adapters.build_command` builds specialist argv without launching a process or writing files.
+`orchestrator.worker_execution.build_worker_command` builds worker argv with read or write authority.
+Claude Code executes Anthropic models only; all other models use the owned Pi SDK bridge, not direct Codex CLI execution.
+The critic uses Pi provider `openai-codex`, model `gpt-6-astra`, and effort `high`.
+Plain version: the configured model determines which approved program runs the task, without substituting another model.
 
-## Verified command surface
+## Claude Code
 
-The baseline is Claude Code 2.1.286 and codex-cli 0.146.1.
-Local help and an intentionally invalid Codex invocation confirmed positional argument separation with `--` without making a model call.
-Tests use deterministic fake executables, not paid requests.
-Actual provider availability, authentication, model compatibility, and live resume behavior still require separately authorized integration testing.
+Specialists receive `-p --output-format json`, explicit `--model` and `--effort`, `--permission-mode dontAsk`, and matching `--tools` and `--allowedTools` lists.
+The specialist allowlist is a validated subset of `Read,Glob,Grep`; an empty list disables tools rather than restoring defaults.
+Workers additionally receive `--restricted`, with `Read,Glob,Grep` for reading and `Edit,Write` added only in write mode.
+Workers receive no shell, test runner, or permission-prompt capability.
+Write workers are not granted the source checkout as an additional directory.
 
-Claude receives `-p --output-format json`, explicit `--model` and `--effort`, `--permission-mode dontAsk`, and matching `--tools` and `--allowedTools` lists from the validated read-only subset of `Read,Glob,Grep`.
-An empty configured list disables built-in tools rather than restoring defaults.
-`--settings '{}'` suppresses the installed wrapper's global model pin, while `--setting-sources ''` excludes user/project/local settings and their recursive orchestration hooks.
+`--settings '{}'` suppresses the installed wrapper's global model pin, while `--setting-sources ''` excludes inherited settings and recursive orchestration hooks.
 `--strict-mcp-config` excludes inherited MCP servers, and `--disable-slash-commands` disables skills.
-Managed policy can still apply; these flags are not a permission bypass or an operating-system sandbox.
-No dollar budget field is configured and no `--max-budget-usd` flag is passed.
-A saved conversation uses `--resume ID` with the same explicit model, effort, and permission controls.
-The runtime must set the subprocess working directory to `cwd`; Claude has no corresponding cwd argument here.
-Plain version: Claude can use only the configured reading tools, cannot ask for approval, and is told which model and effort to use.
+These controls are not an operating-system sandbox or a bypass of managed policy.
+Claude specialist resume uses an explicit saved conversation ID through `--resume`, with the same model, effort, and permissions.
+Worker invocations start fresh instead of inheriting a conversation.
+Plain version: workers get only the listed file tools, but this does not protect against other programs running as the same user.
 
-Codex receives `-a never exec -s read-only -C CWD -m MODEL -c 'model_reasoning_effort="EFFORT"' --json --output-last-message PATH -- PROMPT`.
-The effort value is encoded with `json.dumps` after config validation, producing a quoted TOML-compatible string rather than executable text.
-Resumes retain the outer execution policy and use `exec ... resume --json --output-last-message PATH -- ID PROMPT`.
-The positional API remains available for small test calls and rejects a literal `-` prompt.
-Production runtime sets `stdin_prompt=True`: Claude reads the private prompt file from stdin, and Codex receives the explicit `-` stdin sentinel.
-This avoids argument-size limits for large monitor batches.
-Codex also receives `--ignore-user-config --ignore-rules` so inherited integrations do not widen the specialist role.
-Plain version: prompt text is sent as text, not run as a shell command.
+## Owned Pi SDK bridge
 
-Codex has no equivalent to Claude's `Read,Glob,Grep` tool allowlist.
-Its read-only sandbox can run shell-based inspection; `allowed_tools` does not disable individual Codex tools or shell commands.
-User configuration and rules are deliberately excluded from specialists; the project-specific role contract and operator-managed policies define their authority.
-Authentication environment and administrator policy still apply, and filesystem sandboxing alone does not confine every external service.
-Neither adapter has a per-role spending cap; token counts are not converted into an invented dollar price.
-Codex dispatch rejects unsupported per-tool restrictions rather than silently widening permissions.
-Plain version: Codex is told not to write project files, but that does not limit every outside service or guarantee a spending limit.
+Pi execution is pinned to `@earendil-works/pi-coding-agent` version **0.99.2**.
+The configured Pi executable identifies the installed package; it is not launched as an unrestricted CLI worker.
+An isolated Python launcher in `orchestrator/pi_tools.py` validates that installation outside model-accessible roots, then starts `orchestrator/pi_bridge.mjs` through a trusted Node executable.
+The bridge imports the SDK from that installation and validates its package name and version again.
+
+Provider, model, effort, and tools are explicit.
+The bridge requires an exact catalog provider/model match, usable authentication, supported effort, and an unchanged session effort and active-tool allowlist.
+An unavailable model, unsupported effort, changed model, or failed preflight stops the task without silent fallback or effort downgrade.
+Pi executor efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`, subject to the chosen model's capabilities.
+Schema validation does not prove account access; live model availability still requires authorized testing.
+Plain version: if Pi cannot use exactly what was requested, it stops instead of choosing something else.
+
+Every Pi task has a fresh in-memory session and temporary agent directory.
+Pi tasks are ephemeral and cannot resume; their diagnostic session header is not a resumable supervisor session ID.
+The bridge disables inherited extensions, skills, prompt templates, agent files, user/project model catalogs, automatic compaction, and retries.
+It installs only owned file tools, never the default shell tool.
+
+Authentication reuses the canonical resolved `auth.json` path from `PI_CODING_AGENT_DIR`, or the usual `~/.pi/agent` directory when unset.
+The temporary task home does not receive an auth copy or alias.
+Canonical storage locking and OAuth writeback remain in use, access is filtered to the selected provider, and command-valued credentials are rejected before resolution.
+Only selected provider environment variables are forwarded; inherited plugins and runtime injection settings are not.
+Plain version: Pi can use your existing login without loading your usual extra tools or making a separate login file for each worker.
+
+## File tools and their limits
+
+Pi reading tools are `read`, `ls`, `find`, and `grep`; write mode adds `edit` and `write`.
+The broker handles bounded UTF-8 text files with descriptor-relative, no-symlink traversal.
+It rejects hidden/control paths, parent traversal, files outside authorized roots, and multiply linked or special files.
+Writes are confined to a separate worker checkout; the source project is readable but not writable through these tools.
+`grep` uses literal text, not regular expressions.
+Neither worker executor grants shell commands or test execution; verification must be performed separately by the operator or an authorized external process.
+These are model-tool controls, not hostile-process isolation or an OS sandbox.
+Plain version: the model can read files and make allowed edits, but cannot run commands or tests through its tools.
 
 ## Normalized results
 
-`parse_result(adapter, stdout, returncode)` returns exactly `{"text": str, "session_id": str, "cost_usd": number | None}` or raises `AdapterError`.
-A zero process exit status alone never proves completion.
-Nonzero exits, signals, invalid exit-status types, malformed JSON, duplicate JSON keys, missing terminal success, missing session IDs, conflicting session IDs or terminal results, and explicit failures or interruptions are rejected.
-Identical terminal replay is tolerated; conflicting terminal replay is not.
-Unknown informational event types are ignored for forward compatibility, never promoted to successful completion.
-Plain version: the program must both exit cleanly and say it finished successfully.
+`parse_result(adapter, stdout, returncode)` returns `text`, `session_id`, and `cost_usd`, or raises `AdapterError`.
+A clean process exit alone is insufficient.
+Malformed JSON, duplicate keys, explicit failures, missing completion, and conflicting terminal results are rejected.
 
-Claude accepts a single JSON result object, including pretty-printed JSON, or JSONL containing a result.
-A terminal must have `type=result`, `subtype=success`, and literal `is_error=false`.
-`structured_output`, when present, is serialized as JSON into `text` in preference to `result`, including a legitimate JSON null value.
-Otherwise `result` must be a nonempty string.
-The consumer still validates the graph or review application schema; this parser does not interpret approval from prose.
-Claude's `total_cost_usd` is optional, finite, numeric, nonnegative, and never a boolean or string.
-Missing/null cost remains `None`, not zero.
-Resumed cost scope is not yet verified; the runtime stores the reported value and does not aggregate it as verified per-turn spending.
-Plain version: use the checked structured answer when provided, and leave unknown costs unknown.
+Claude requires terminal `type=result`, `subtype=success`, literal `is_error=false`, and a consistent session ID.
+If present, `structured_output` is serialized into `text`; otherwise the terminal result must contain nonempty text.
+Optional Claude dollar cost must be finite and nonnegative; missing cost remains unknown.
+Its resumed-session cost scope is not established, so reported values must not be summed as verified per-turn spending.
 
-Codex requires a `thread.started` ID, a completed `agent_message` with text, and a later `turn.completed`.
-Only completed agent messages count; progress, reasoning, and tool output are not final answers.
-The last completed agent message before terminal success supplies `text`.
-Failure events, failed/interrupted items, and new turn/item activity after terminal completion are rejected conservatively.
-The parser does not require or read `--output-last-message`; stale or missing artifact files cannot substitute for a successful event stream.
-Codex `cost_usd` is always `None`, because the documented stream reports token usage rather than dollar cost.
-Plain version: take Codex's final finished answer, not an earlier update or a leftover file.
+Pi requires a verified 0.99.2 preflight, a diagnostic session header, matched message and tool events, a successful final assistant message, and settlement with no later activity.
+Retries, compaction, model changes, failed tools, unexpected events, incomplete tools, and truncated output fail closed.
+Pi returns `session_id=None` and `cost_usd=None`.
+A legacy Codex transcript decoder remains for compatibility, but direct Codex execution is not supported.
+Plain version: an answer counts only after the expected program finishes cleanly with the requested model and tools.
 
 ## Runtime responsibilities
 
-Runtime owns subprocess creation with `shell=False`, explicit cwd and a child-marked environment, bounded stdout/stderr capture, private output paths, and resource reservations.
-It must remove inherited nested-session markers and model/effort overrides without leaking credentials into logs, and isolate unsafe inherited harness integrations.
-Production prompts use private stdin files rather than argv; sensitive prompts still remain in owner-readable local artifacts.
-Neither builder nor parser changes process-global environment variables.
-
-Runtime also owns deadlines, cancellation, process groups, termination escalation, reaping children, lease fencing, and persistence.
-Record the run before launch, reserve resources before spawning, and keep the reservation until the process tree is gone.
-On cancellation or timeout, invalidate the attempt before accepting late results; terminate the whole group, wait a bounded grace period, then kill and reap remaining children.
-Never report a canceled attempt as successful merely because stdout already contains a successful result.
-A frontend disconnect is not cancellation, and an uncertain interrupted run must not be blindly replayed.
-Plain version: the supervisor stops all parts of a canceled job and ignores answers that arrive too late.
+The runtime owns subprocess creation, explicit cwd, private stdin prompts, bounded output, resource reservations, deadlines, cancellation, process identity, attempt fencing, and persistence.
+Production prompts travel through stdin rather than command arguments, but remain in owner-readable local artifacts.
+Neither builder nor parser mutates the process-global environment.
+A frontend disconnect is not cancellation; cancelled or uncertain attempts are not silently replayed or accepted.
+No per-role dollar cap is configured.
+Worker results additionally require structured reports and, for writes, program-captured workspace provenance before becoming candidates.
+Only explicit operator acceptance completes their graph nodes; see [workers](workers.md).
+Plain version: the supervisor records each job, stops cancelled work, and keeps completed changes waiting for your review.

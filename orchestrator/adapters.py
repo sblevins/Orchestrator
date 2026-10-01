@@ -2,9 +2,10 @@
 
 import json
 import math
+import sys
 from pathlib import Path
 
-from orchestrator.config import ConfigurationError, role_config
+from orchestrator.config import ConfigurationError, role_config, validate_executor
 
 
 class AdapterError(ValueError):
@@ -14,6 +15,10 @@ class AdapterError(ValueError):
 def _argument(value, name, *, allow_empty=False):
     if not isinstance(value, str) or "\x00" in value or (not allow_empty and not value.strip()):
         raise AdapterError(f"{name} must be a string without NUL characters")
+    try:
+        value.encode("utf-8", "strict")
+    except UnicodeError as error:
+        raise AdapterError(f"{name} must be valid Unicode") from error
     return value
 
 
@@ -39,8 +44,8 @@ def build_command(
     except ConfigurationError as error:
         raise AdapterError(str(error)) from error
     _argument(prompt, "prompt")
-    working_directory = _argument(str(cwd), "cwd")
-    result_path = _argument(str(output_path), "output_path")
+    _argument(str(cwd), "cwd")
+    _argument(str(output_path), "output_path")
     if session_id is not None:
         _argument(session_id, "session_id")
         if session_id.startswith("-"):
@@ -76,40 +81,88 @@ def build_command(
             command += ["--resume", session_id]
         if stdin_prompt:
             return command
+    elif adapter == "pi":
+        if session_id is not None:
+            raise AdapterError("Pi sessions are ephemeral and cannot be resumed")
+        return build_pi_command(
+            config,
+            settings,
+            prompt,
+            cwd,
+            output_path,
+            project_root=project_root,
+            stdin_prompt=stdin_prompt,
+        )
     else:
-        if prompt == "-" and not stdin_prompt:
-            raise AdapterError("Codex prompt cannot be the stdin sentinel '-'")
-        # Codex accepts TOML values. A JSON-escaped validated effort string is
-        # also a TOML basic string; never interpolate unquoted configuration.
-        command += [
-            "-a",
-            "never",
-            "exec",
-            "-s",
-            "read-only",
-            "-C",
-            working_directory,
-            "-m",
-            settings["model"],
-            "-c",
-            "model_reasoning_effort=" + json.dumps(settings["effort"]),
-        ]
-        if session_id is not None:
-            command += ["resume"]
-        command += [
-            "--ignore-user-config",
-            "--ignore-rules",
-            "--json",
-            "--output-last-message",
-            result_path,
-        ]
-        if stdin_prompt:
-            prompt = "-"
-        if session_id is not None:
-            command += ["--", session_id, prompt]
-            return command
+        raise AdapterError("unsupported execution adapter; use claude or pi")
     command += ["--", prompt]
     return command
+
+
+def build_pi_command(
+    config, settings, prompt, cwd, output_path, *, project_root=None, stdin_prompt=True, mode="read"
+):
+    """Build an owned SDK bridge invocation, never execute a configured CLI directly.
+
+    The isolated Python launcher resolves the trusted Pi installation at execution
+    time and then starts the pinned SDK with canonical auth and no discovery.
+    """
+    try:
+        validate_executor(settings)
+    except ConfigurationError as error:
+        raise AdapterError(str(error)) from error
+    if settings.get("adapter", settings.get("harness")) != "pi":
+        raise AdapterError("Pi builder requires a Pi profile")
+    _argument(prompt, "prompt")
+    _argument(str(output_path), "output_path")
+    if mode not in ("read", "write") or type(stdin_prompt) is not bool:
+        raise AdapterError("invalid Pi invocation mode")
+    command = config.get("adapters", {}).get("pi", {}).get("command")
+    if not isinstance(command, list) or len(command) != 1:
+        raise AdapterError("Pi command must contain only one executable")
+    executable = _argument(command[0], "Pi executable")
+    if executable.startswith("-"):
+        raise AdapterError("invalid Pi executable")
+    tools = settings.get("allowed_tools")
+    if not isinstance(tools, list) or any(not isinstance(tool, str) for tool in tools):
+        raise AdapterError("Pi tools must be an explicit list")
+    tool_mapping = {
+        "Read": ["read", "ls"],
+        "Glob": ["find"],
+        "Grep": ["grep"],
+        "Edit": ["edit"],
+        "Write": ["write"],
+        **{name: [name] for name in ("read", "ls", "find", "grep", "edit", "write")},
+    }
+    allowed = {"read", "ls", "find", "grep"} | ({"edit", "write"} if mode == "write" else set())
+    selected = []
+    for tool in tools:
+        if tool not in tool_mapping or not set(tool_mapping[tool]) <= allowed:
+            raise AdapterError("Pi profile contains a forbidden tool")
+        for name in tool_mapping[tool]:
+            if name not in selected:
+                selected.append(name)
+    if mode == "write" and project_root is None:
+        raise AdapterError("Pi write mode requires a separate source project root")
+    options = {
+        "executable": executable,
+        "provider": settings["provider"],
+        "model": settings["model"],
+        "effort": settings["effort"],
+        "mode": mode,
+        "tools": selected,
+        "cwd": _argument(str(cwd), "cwd"),
+        "project_root": _argument(str(project_root), "project_root") if project_root else None,
+    }
+    if not stdin_prompt:
+        options["prompt"] = prompt
+    return [
+        sys.executable,
+        "-I",
+        str(Path(__file__).with_name("pi_tools.py")),
+        "launch",
+        json.dumps(options, ensure_ascii=True, allow_nan=False),
+    ]
 
 
 def _unique_object(pairs):
@@ -175,12 +228,226 @@ def _text(value):
     return value
 
 
+def _parse_pi_result(stdout, returncode):
+    """Accept only the owned bridge's verified, settled, clean one-run protocol."""
+    if type(returncode) is not int or returncode != 0:
+        raise AdapterError(f"pi exited unsuccessfully: {returncode!r}")
+    try:
+        output_size = len(stdout.encode("utf-8", "strict")) if isinstance(stdout, str) else 0
+    except UnicodeError as error:
+        raise AdapterError("invalid Pi Unicode") from error
+    if not isinstance(stdout, str) or not stdout.endswith("\n") or output_size > 4 * 1024 * 1024:
+        raise AdapterError("missing, truncated, or oversized Pi output")
+    try:
+        records = [_decode(line.removesuffix("\r")) for line in stdout[:-1].split("\n")]
+    except (ValueError, RecursionError) as error:
+        raise AdapterError("malformed Pi JSONL") from error
+    if any(
+        not isinstance(record, dict) or not isinstance(record.get("type"), str)
+        for record in records
+    ):
+        raise AdapterError("Pi records must be typed objects")
+    if len(records) < 5:
+        raise AdapterError("incomplete Pi run")
+    preflight, header = records[:2]
+    if (
+        preflight.get("type") != "orchestrator_pi_preflight"
+        or preflight.get("verified") is not True
+        or preflight.get("version") != "0.99.2"
+        or preflight.get("mode") not in ("read", "write")
+        or preflight.get("effort") not in ("off", "minimal", "low", "medium", "high", "xhigh")
+        or header.get("type") != "session"
+        or header.get("version") != 3
+    ):
+        raise AdapterError("missing verified Pi preflight/session")
+    _argument(header.get("id"), "Pi diagnostic session ID")
+    provider = _argument(preflight.get("provider"), "Pi provider")
+    model = _argument(preflight.get("model"), "Pi model")
+    if "anthropic" in provider.lower() or "claude" in model.lower():
+        raise AdapterError("Anthropic model routed to Pi")
+    tools = preflight.get("tools")
+    allowed = {"read", "ls", "find", "grep"}
+    if preflight["mode"] == "write":
+        allowed |= {"edit", "write"}
+    if (
+        not isinstance(tools, list)
+        or any(not isinstance(tool, str) for tool in tools)
+        or len(tools) != len(set(tools))
+        or not set(tools) <= allowed
+    ):
+        raise AdapterError("invalid verified Pi tools")
+    started = ended = settled = turn = False
+    opened_message = None
+    final = None
+    requested = {}
+    executing = set()
+    completed = set()
+    tool_results = set()
+    for event in records[2:]:
+        kind = event["type"]
+        if settled:
+            raise AdapterError("Pi activity after settlement")
+        if (
+            "error" in kind.lower()
+            or "retry" in kind.lower()
+            or "compaction" in kind.lower()
+            or "abort" in kind.lower()
+            or kind.startswith("extension_")
+        ):
+            raise AdapterError("Pi reported failure or unexpected recovery")
+        if kind == "agent_start":
+            if started:
+                raise AdapterError("multiple Pi runs")
+            started = True
+        elif kind == "turn_start":
+            if not started or ended or turn or opened_message:
+                raise AdapterError("invalid Pi turn start")
+            turn = True
+        elif kind == "message_start":
+            if not turn or opened_message is not None:
+                raise AdapterError("invalid Pi message start")
+            message = event.get("message")
+            if not isinstance(message, dict) or message.get("role") not in (
+                "user",
+                "assistant",
+                "toolResult",
+                "system",
+            ):
+                raise AdapterError("invalid Pi message")
+            opened_message = message["role"]
+        elif kind == "message_update":
+            if opened_message != "assistant":
+                raise AdapterError("Pi update without an assistant message")
+        elif kind == "message_end":
+            message = event.get("message")
+            if (
+                not turn
+                or opened_message is None
+                or not isinstance(message, dict)
+                or message.get("role") != opened_message
+            ):
+                raise AdapterError("unmatched Pi message end")
+            opened_message = None
+            if message["role"] == "assistant":
+                if (
+                    message.get("provider") != provider
+                    or message.get("model") != model
+                    or message.get("stopReason") not in ("stop", "toolUse")
+                    or not isinstance(message.get("content"), list)
+                    or message.get("errorMessage")
+                ):
+                    raise AdapterError("Pi assistant failed or changed model")
+                final = message
+                for block in message["content"]:
+                    if not isinstance(block, dict) or block.get("type") not in (
+                        "text",
+                        "thinking",
+                        "toolCall",
+                    ):
+                        raise AdapterError("invalid Pi content block")
+                    if block.get("type") == "toolCall":
+                        call_id = _argument(block.get("id"), "Pi tool call ID")
+                        if block.get("name") not in tools or call_id in requested:
+                            raise AdapterError("forbidden or repeated Pi tool request")
+                        requested[call_id] = block["name"]
+            elif message["role"] == "toolResult":
+                call_id = message.get("toolCallId")
+                if (
+                    not isinstance(call_id, str)
+                    or call_id not in completed
+                    or call_id in tool_results
+                    or message.get("isError") is not False
+                    or message.get("toolName") != requested[call_id]
+                ):
+                    raise AdapterError("Pi tool result failed or mismatched")
+                tool_results.add(call_id)
+        elif kind == "tool_execution_start":
+            call_id = event.get("toolCallId")
+            if (
+                not turn
+                or not isinstance(call_id, str)
+                or call_id not in requested
+                or call_id in executing
+                or call_id in completed
+                or event.get("toolName") != requested[call_id]
+            ):
+                raise AdapterError("invalid Pi tool start")
+            executing.add(call_id)
+        elif kind == "tool_execution_update":
+            call_id = event.get("toolCallId")
+            if not isinstance(call_id, str) or call_id not in executing:
+                raise AdapterError("unmatched Pi tool update")
+        elif kind == "tool_execution_end":
+            call_id = event.get("toolCallId")
+            if (
+                not isinstance(call_id, str)
+                or call_id not in executing
+                or event.get("isError") is not False
+                or event.get("toolName") != requested[call_id]
+            ):
+                raise AdapterError("Pi tool failed or did not start")
+            executing.remove(call_id)
+            completed.add(call_id)
+        elif kind == "turn_end":
+            if not turn or opened_message or executing or event.get("message") != final:
+                raise AdapterError("invalid Pi turn end")
+            turn = False
+        elif kind == "agent_end":
+            if (
+                not started
+                or ended
+                or turn
+                or opened_message
+                or executing
+                or event.get("willRetry") is not False
+                or not isinstance(event.get("messages"), list)
+            ):
+                raise AdapterError("invalid Pi agent end")
+            assistants = [
+                message
+                for message in event["messages"]
+                if isinstance(message, dict) and message.get("role") == "assistant"
+            ]
+            if not assistants or assistants[-1] != final:
+                raise AdapterError("conflicting Pi final assistant")
+            ended = True
+        elif kind == "agent_settled":
+            if (
+                not ended
+                or executing
+                or set(requested) != completed
+                or completed != tool_results
+                or not final
+                or final.get("stopReason") != "stop"
+                or any(block.get("type") == "toolCall" for block in final["content"])
+            ):
+                raise AdapterError("Pi settled without completed final response")
+            settled = True
+        elif kind == "queue_update":
+            if event.get("steering") or event.get("followUp"):
+                raise AdapterError("unexpected queued Pi work")
+        else:
+            raise AdapterError(f"unexpected Pi event: {kind}")
+    if not settled:
+        raise AdapterError("missing Pi settlement")
+    texts = []
+    for block in final["content"]:
+        if block.get("type") == "text":
+            if not isinstance(block.get("text"), str):
+                raise AdapterError("invalid final Pi text")
+            _argument(block["text"], "Pi final text", allow_empty=True)
+            texts.append(block["text"])
+    return {"text": _text("\n".join(texts)), "session_id": None, "cost_usd": None}
+
+
 def parse_result(adapter: str, stdout: str, returncode: int) -> dict:
     """Require both zero exit status and an unambiguous terminal success.
 
     Unknown informational event types are ignored, not treated as success.
     Codex token usage is not a dollar price; its cost is always unknown (None).
     """
+    if adapter == "pi":
+        return _parse_pi_result(stdout, returncode)
     if adapter not in ("claude", "codex"):
         raise AdapterError(f"unsupported adapter: {adapter}")
     if type(returncode) is not int or returncode != 0:

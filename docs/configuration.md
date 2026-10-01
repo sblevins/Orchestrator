@@ -57,6 +57,7 @@ The program must check that file before using it.
 
 The planner must return a JSON object with `summary` as a string, `assumptions`, `risks`, and `questions` as string lists, and `nodes` as a list of node objects.
 Each node has string `id`, `title`, and `description` fields; string lists `depends_on` and `acceptance_criteria`; and `kind` equal to `work`, `review`, or `approval`.
+An optional `mode` defaults to `read`; only work nodes can request `write`.
 The graph must have unique identifiers, valid dependency references, and no cycles or self-dependencies.
 The critic must return a JSON object with `verdict` equal to `approved` or `changes_requested`, and a `findings` list.
 The monitor must return a JSON object with integer `reviewed_through` and a `findings` list whose entries have `severity` equal to `info`, `warning`, or `blocking`, string `summary`, and optional string `evidence` and `proposed_action`.
@@ -69,7 +70,7 @@ It is the graph-execution concurrency limit, separate from `supervisor.max_paral
 `execution.dependency_failure` defaults to `"block"` and also accepts `"cancel"`.
 The runtime must enforce the chosen policy for dependent nodes when a prerequisite fails and must never treat a failed prerequisite as completed successfully.
 It must allow a node to start only when its dependencies have actually succeeded and required approvals are present.
-These settings do not implement a scheduler, validate graphs, approve execution, or enable workers.
+These preferences are enforced by the worker service; they do not grant approval by themselves.
 Plain version: the program, not a model's promise, must prevent a task from starting too early.
 If required work fails, tasks that need it stay blocked or are cancelled according to your setting.
 
@@ -83,10 +84,11 @@ Edit the tracked role Markdown files to change role instructions.
 Every role's model and effort can be overridden privately.
 
 The orchestrator defaults to `claude-sonnet-5-5` with low effort; planner and monitor default to `claude-opus-5-5` with high effort.
-The critic defaults to `gpt-6-astra` through Codex with high effort.
-Model identifiers are arbitrary nonempty strings passed unchanged to adapters, not a fixed model catalog.
+The critic defaults to `gpt-6-astra` through Pi with provider `openai-codex` and high effort.
+Model identifiers are passed unchanged, without a fixed model catalog.
+Claude Code accepts Anthropic `claude-*` names; other models use Pi with an explicit `provider` setting.
 These requested identifiers are not a claim of provider availability; configure the exact identifier your provider supports.
-Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Codex efforts are `minimal`, `low`, `medium`, `high`, and `xhigh`.
+Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Pi efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
 No model-specific effort assumptions or silent fallbacks are applied.
 Plain version: you can change any model name, but the chosen command must support the effort setting and the provider must actually offer that model.
 
@@ -99,34 +101,36 @@ Memory uses positive integer `M` or `G` strings, bounded from `64M` through `102
 Resource settings express requested reservations; the runtime must still obtain machine resources before launching work.
 Allowed tools are a unique list containing only `Read`, `Glob`, and `Grep`.
 Claude supports narrower lists, including an empty list.
-Codex specialists require the full list because the CLI provides a read-only sandbox rather than individual Read/Glob/Grep switches; unsupported narrower permissions are rejected.
+Pi translates the same logical permissions into controlled file tools, without shell access.
 Adapters must translate these logical read-only permissions into their own enforcement and reject unsupported restrictions rather than widening access.
 Plain version: choose the model and how carefully it should think; the background program handles machine limits and checks what it may read.
 
-`adapters.claude.command` defaults to `["claude"]`, and `adapters.codex.command` defaults to `["codex"]`.
+`adapters.claude.command` defaults to `["claude"]`, and `adapters.pi.command` defaults to `["pi"]`.
 Commands are argv lists containing exactly one nonempty executable name or path.
 All additional arguments are rejected because the adapter owns sandbox, permission, and tool flags.
 Known dangerous bypass spellings are also rejected in the executable entry.
 Executable paths are trusted administrator selections; validation cannot prove an arbitrary executable is safe.
 There is no shell interpolation and no automatic approval setting.
 
-## Frontends and deferred routing
+## Frontends and worker routing
 
 `frontends.preferred` defaults to `claude` and also accepts `pi`.
 `frontends.claude.command` and `frontends.pi.command` follow the same executable-only argv format.
 An executable launcher script is valid, for example `["/absolute/path/to/pi-launcher"]`; an interpreter-plus-script list or extra command-line flags is not.
 Launcher scripts are trusted local programs, not an escape from specialist read-only restrictions.
-Pi is an interactive frontend, not a supported specialist adapter.
+Pi supports both the interactive frontend and supervised specialist execution.
 Claude remains the preferred interactive frontend, with native voice handled by Claude itself.
 Both interfaces can start directly in the repository without the optional launcher.
 Native Pi applies `roles.orchestrator`; native Claude foreground selection follows its own project/user/CLI precedence, so a global CLI pin can override the project default.
 Use native `/model` and `/effort`, or the optional launcher, to select the configured fast Claude role explicitly.
 
-`workers` must contain only `enabled = false`.
-`routing.enabled` must be false, `routing.rules` must be an empty list, and optional `routing.first_mate` must be an empty table.
-There is no default worker model, no executable First Mate policy, and no worker launch permission.
-Attempts to enable workers or routing, add routing rules, or populate the reserved policy table fail validation.
-Plain version: both chat interfaces may use the same supervisor, but temporary workers cannot run until a real router is implemented.
+`workers` contains only a boolean `enabled` setting, defaulting to true.
+`routing.enabled` also defaults to true, but neither setting supplies worker profiles.
+`routing.rules` and `routing.first_mate` remain empty compatibility fields, not active inline policy.
+Set worker preferences in `<project-root>/.orchestrator/crew-dispatch.json`, falling back to `<home>/config/crew-dispatch.json` only when the project file is absent.
+Invalid project policy is an error, never permission to use a fallback.
+See [worker routing](workers.md) for the FirstMate-compatible policy format and approval gates.
+Plain version: both interfaces share the same workers, but nothing runs until you configure who may do each task.
 
 ## Monitor intake
 

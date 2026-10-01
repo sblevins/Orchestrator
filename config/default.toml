@@ -34,16 +34,16 @@ command = ["claude"]
 command = ["pi"]
 
 [workers]
-enabled = false
+enabled = true
 [routing]
-enabled = false
+enabled = true
 rules = []
 [routing.first_mate]
 
 [adapters.claude]
 command = ["claude"]
-[adapters.codex]
-command = ["codex"]
+[adapters.pi]
+command = ["pi"]
 
 [roles.orchestrator]
 adapter = "claude"
@@ -60,7 +60,8 @@ allowed_tools = ["Read", "Glob", "Grep"]
 prompt_path = "roles/planner.md"
 
 [roles.critic]
-adapter = "codex"
+adapter = "pi"
+provider = "openai-codex"
 model = "gpt-6-astra"
 effort = "high"
 allowed_tools = ["Read", "Glob", "Grep"]

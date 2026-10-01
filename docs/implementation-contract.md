@@ -1,5 +1,8 @@
 # Implementation contract
 
+> Historical foundation contract.
+> Current worker behavior is specified in [worker implementation contract](worker-implementation-contract.md); non-Anthropic specialists now use Pi.
+
 The user wants Pi and Claude Code frontends over one local durable supervisor.
 Claude Code is the preferred interactive frontend and must retain its native voice support.
 There are four planning roles: orchestrator, planner, critic, and monitor.

@@ -15,7 +15,7 @@ CORE_ROLES = ("orchestrator", "planner", "critic", "monitor")
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "default.toml"
 ADAPTER_EFFORTS = {
     "claude": {"low", "medium", "high", "xhigh", "max"},
-    "codex": {"minimal", "low", "medium", "high", "xhigh"},
+    "pi": {"off", "minimal", "low", "medium", "high", "xhigh"},
 }
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep"}
 SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
@@ -73,6 +73,32 @@ def _command(value, context):
         _fail(f"{context} contains a forbidden permission bypass")
 
 
+def validate_executor(settings: dict, context="profile") -> None:
+    """Keep the requested provider on its configured harness, without fallback."""
+    adapter = settings.get("adapter", settings.get("harness"))
+    model = settings.get("model")
+    _text(model, f"{context}.model")
+    provider = settings.get("provider")
+    if adapter == "claude":
+        if provider not in (None, "anthropic") or not model.lower().startswith("claude-"):
+            _fail(
+                f"{context}: Claude Code is reserved for Anthropic claude-* models; use Pi otherwise"
+            )
+    elif adapter == "pi":
+        _text(provider, f"{context}.provider")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", provider):
+            _fail(f"{context}.provider must be a provider identifier")
+        if "anthropic" in provider.lower() or "claude" in model.lower():
+            _fail(f"{context}: use Claude Code for Anthropic models, not Pi")
+    else:
+        _fail(f"{context}: use claude for Anthropic models or pi with an explicit provider")
+    if (
+        not isinstance(settings.get("effort"), str)
+        or settings["effort"] not in ADAPTER_EFFORTS[adapter]
+    ):
+        _fail(f"{context}.effort is unsupported by {adapter}; no silent effort downgrade")
+
+
 def validate_config(config: dict) -> None:
     """Validate required structure and safety limits without model-name enums."""
     if not isinstance(config, dict):
@@ -125,18 +151,18 @@ def validate_config(config: dict) -> None:
     for key in ("name", "communication_style"):
         _text(personalization.get(key), f"personalization.{key}")
     workers = _table(config, "workers")
-    if workers.get("enabled") is not False or set(workers) != {"enabled"}:
-        _fail("workers must contain only enabled=false; workers are not implemented")
+    if type(workers.get("enabled")) is not bool or set(workers) != {"enabled"}:
+        _fail("workers must contain only a boolean enabled setting")
     routing = _table(config, "routing")
     if (
-        routing.get("enabled") is not False
+        type(routing.get("enabled")) is not bool
         or routing.get("rules") != []
         or not isinstance(routing.get("rules"), list)
         or set(routing) - {"enabled", "rules", "first_mate"}
     ):
-        _fail("routing must remain disabled with empty rules and no worker defaults")
+        _fail("routing uses enabled plus project crew-dispatch.json, not inline rules/defaults")
     if "first_mate" in routing and routing["first_mate"] != {}:
-        _fail("routing.first_mate must be an empty policy table until routing exists")
+        _fail("Put FirstMate routing preferences in the project's .orchestrator/crew-dispatch.json")
     adapters = _table(config, "adapters")
     for name, adapter in adapters.items():
         if name not in ADAPTER_EFFORTS or not isinstance(adapter, dict):
@@ -151,6 +177,7 @@ def validate_config(config: dict) -> None:
         if not isinstance(adapter, str) or adapter not in adapters:
             _fail(f"roles.{name}.adapter must name a configured specialist adapter")
         _text(role.get("model"), f"roles.{name}.model")
+        validate_executor(role, f"roles.{name}")
         effort = role.get("effort")
         if not isinstance(effort, str) or effort not in ADAPTER_EFFORTS[adapter]:
             _fail(f"roles.{name}.effort is unsupported by {adapter}")
@@ -174,10 +201,6 @@ def validate_config(config: dict) -> None:
             or len(tools) != len(set(tools))
         ):
             _fail(f"roles.{name}.allowed_tools must be unique read-only Read/Glob/Grep tools")
-        if name != "orchestrator" and adapter == "codex" and set(tools) != READ_ONLY_TOOLS:
-            _fail(
-                f"roles.{name}: Codex supports the full read-only sandbox, not per-tool restrictions"
-            )
         if "prompt_path" in role and role["prompt_path"] != f"roles/{name}.md":
             _fail(f"roles.{name}.prompt_path must be roles/{name}.md")
     if "frontends" in config:

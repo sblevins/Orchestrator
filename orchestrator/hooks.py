@@ -163,7 +163,7 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
             if requested != session_id:
                 reason = "Use this coordinator instance's exact session ID, not another instance."
         elif name not in allowed:
-            reason = "This coordinator is read-only and worker routing is disabled. Use Orchestrator tools, not native workers or write tools."
+            reason = "This foreground coordinator is read-only. Use tracked Orchestrator worker tools, not untracked native agents or foreground write tools."
         if reason:
             return {
                 "hookSpecificOutput": {

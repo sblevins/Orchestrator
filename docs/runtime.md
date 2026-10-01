@@ -1,7 +1,8 @@
 # Local runtime
 
 Claude and Pi frontends share one SQLite-backed local supervisor.
-The only runnable roles are planner, critic, and monitor; worker dispatch remains disabled.
+Planner, critic, monitor, and authorized temporary workers run as supervised background processes.
+Workers never create Herder tabs or interactive windows.
 In plain English: either frontend can leave while the same background work continues.
 
 ## Entry points
@@ -40,14 +41,16 @@ In plain English: uncertain work is reported as uncertain, not silently repeated
 
 ## Inputs, results, and privacy
 
-Each attempt uses a private directory below `data/runs/TASK/TOKEN` rather than executing in the project checkout.
+Each attempt stores artifacts in a private directory below `data/runs/TASK/TOKEN`.
+Write workers execute in isolated Git worktrees; read workers have only controlled reading tools.
 The complete prompt is saved in `prompt.txt`, including the tracked role instructions, personalization, canonical source-root context, and task evidence.
-Only configured read-only adapter tools are permitted; no permission bypass is added.
-Claude receives the canonical project root through `--add-dir`; Codex uses its read-only sandbox and ignores inherited user configuration and rules.
+Core specialists have read-only tools; authorized write workers add file editing tools, not a shell.
+No permission bypass is added.
+Claude receives the canonical project root through `--add-dir`; Pi uses owned path-limited file tools without inherited orchestration integrations.
 A private working directory and read-only tools are not a hostile-process isolation boundary.
 
 Child environments retain normal authentication but remove `ORCHESTRATOR_SESSION_ID`, `ORCHESTRATOR_FRONTEND`, and `CLAUDECODE` nesting context, and set `ORCHESTRATOR_CHILD=1`.
-The runtime never reads credential files.
+Credential reuse is adapter-owned and must not expose secrets in prompts or logs.
 Harness stdin reads the private prompt file, avoiding command-line argument limits and prompt exposure in process listings.
 The combined stdout/stderr log is private and capped at 8 MiB; excess output fails the attempt and terminates its process group.
 Adapter result files are checked for oversized output and symlinks, but only the adapter's verified stdout terminal protocol establishes success.
@@ -75,5 +78,17 @@ Tests use real subprocesses and fake local harness/registry executables, never p
 
 The stored Claude cost is the harness-reported value, not a verified per-turn delta across resumes.
 Do not sum resumed reports as if that accounting has been validated.
-Codex cost is unknown.
+Pi cost remains unknown unless its adapter supplies validated accounting evidence.
 Neither adapter has a configured per-role dollar cap; timeouts and machine-resource limits remain enforced.
+
+## Worker lifecycle
+
+Policy snapshots pin the chosen provider, model, effort, and routing rationale before dispatch.
+Plan requests receive selections only from an accepted monitor response that actually received those requests.
+Unrelated requests receive selections from the owning foreground coordinator.
+Operator approval, policy freshness, scope version, holds, pauses, dependencies, and leases are rechecked before execution.
+The worker service validates structured reports separately from the harness terminal protocol.
+Program-captured worktree/diff/commit evidence stays separate from the worker's claims.
+A successful worker is a candidate awaiting operator acceptance, not an automatically successful graph node.
+Only accepted prerequisites release dependent work.
+Plain version: save who was chosen and why, check permission again before starting, and wait for review before using the result.

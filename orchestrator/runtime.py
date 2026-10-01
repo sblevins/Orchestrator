@@ -213,7 +213,20 @@ def run_task(home: Path, task_id: str, token: str) -> int:
         from .adapters import build_command, parse_result
 
         config = task["config"]
-        role = role_config(config, task["role"])
+        workspace = None
+        worker_service = None
+        if task["role"] == "worker":
+            from .workers import WorkerService
+
+            worker_service = WorkerService(store)
+            grant = worker_service.start_check(task)
+            role = {
+                **grant["profile"],
+                "adapter": grant["profile"]["harness"],
+                "prompt_path": "roles/worker.md",
+            }
+        else:
+            role = role_config(config, task["role"])
         settings = config["supervisor"]
         heartbeat = min(settings["heartbeat_seconds"], 1.0)
         directory = store.data / "runs" / task_id / token
@@ -222,34 +235,83 @@ def run_task(home: Path, task_id: str, token: str) -> int:
         prompt = _prompt(store, task, role)
         atomic_write(directory / "prompt.txt", prompt)
         output_path = directory / "result.txt"
-        command = build_command(
-            config,
-            task["role"],
-            prompt,
-            directory,
-            output_path,
-            session_id=_resume_session(store, task),
-            project_root=Path(store.project(task["project_id"])["root"]),
-            stdin_prompt=True,
-        )
+        working_directory = directory
+        if worker_service is not None:
+            from .worker_execution import build_worker_command, prepare_workspace
+
+            project_root = Path(store.project(task["project_id"])["root"])
+            workspace = prepare_workspace(
+                store.home,
+                worker_service.get(grant["request_id"]),
+                project_root,
+                grant.get("dependency_commits", ()),
+            )
+            worker_service.record_workspace(task, workspace)
+            working_directory = Path(workspace["path"])
+            prompt += (
+                "\n\nAuthorized worker workspace (inspect this, not stale source):\n"
+                + encode(
+                    {
+                        "path": str(working_directory),
+                        "mode": grant["mode"],
+                        "dependency_commits": grant.get("dependency_commits", []),
+                    }
+                )
+            )
+            atomic_write(directory / "prompt.txt", prompt)
+            command = build_worker_command(
+                config,
+                grant["profile"],
+                grant["mode"],
+                prompt,
+                working_directory,
+                output_path,
+                project_root=working_directory if grant["mode"] == "read" else project_root,
+            )
+        else:
+            command = build_command(
+                config,
+                task["role"],
+                prompt,
+                directory,
+                output_path,
+                session_id=_resume_session(store, task),
+                project_root=Path(store.project(task["project_id"])["root"]),
+                stdin_prompt=True,
+            )
         deadline = time.monotonic() + settings["task_timeout_seconds"]
-        # A regular file avoids argv size limits and pipe backpressure deadlocks.
-        with (directory / "prompt.txt").open("rb") as prompt_input:
+        # Serialize the final authorization check and spawn against cancellation,
+        # scope changes, holds and takeover transactions. Never hold this lock
+        # while preparing workspaces, constructing commands, or running inference.
+        with (directory / "prompt.txt").open("rb") as prompt_input, store.transaction() as database:
+            current = database.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if (
+                not current
+                or current["token"] != token
+                or current["state"] != "running"
+                or current["cancel_requested"]
+            ):
+                raise RuntimeError("Task cancelled or attempt revoked before harness launch")
+            if worker_service is not None:
+                worker_service.task_check(database, current, active=True)
             child = subprocess.Popen(
                 command,
-                cwd=directory,
+                cwd=working_directory,
                 env=_environment(),
                 stdin=prompt_input,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
             )
-        child_record = {
-            "pid": child.pid,
-            "identity": process_identity(child.pid),
-            "deadline": time.time() + settings["task_timeout_seconds"],
-        }
-        store.set_service_value("harness:" + task_id, encode(child_record))
+            child_record = {
+                "pid": child.pid,
+                "identity": process_identity(child.pid),
+                "deadline": time.time() + settings["task_timeout_seconds"],
+            }
+            database.execute(
+                "INSERT INTO service(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("harness:" + task_id, encode(child_record)),
+            )
         stdout = bytearray()
         count = 0
         with selectors.DefaultSelector() as selector, (directory / "output.log").open("xb") as log:
@@ -289,10 +351,16 @@ def run_task(home: Path, task_id: str, token: str) -> int:
             output_path.is_symlink() or output_path.stat().st_size > OUTPUT_LIMIT
         ):
             raise RuntimeError("Unsafe or oversized harness result")
-        result = parse_result(role["adapter"], stdout.decode("utf-8", errors="replace"), returncode)
+        result = parse_result(role["adapter"], stdout.decode("utf-8", errors="strict"), returncode)
         if returncode != 0:
             raise RuntimeError(f"Harness failed with exit {returncode}")
         values = result if isinstance(result, dict) else vars(result)
+        if workspace is not None and grant["mode"] == "write":
+            from .worker_execution import capture_workspace
+
+            # Capture controlled Git evidence separately from the model's claims.
+            workspace = {**workspace, **capture_workspace(workspace)}
+            worker_service.record_workspace(task, workspace)
         if not store.finish(
             task_id,
             token,
@@ -336,11 +404,21 @@ def _strict_json(text: str):
 def _process_results(store: Store) -> None:
     for task in store.unprocessed():
         try:
+            if task["role"] == "worker":
+                from .workers import WorkerService
+
+                WorkerService(store).process_result(task)
+                continue
             if task["state"] != "succeeded":
                 raise ValueError(task["error"] or f"Task ended {task['state']}")
             value = _strict_json(task["result"])
             if task["role"] == "monitor":
-                store.apply_monitor(task, value["reviewed_through"], value["findings"])
+                store.apply_monitor(
+                    task,
+                    value["reviewed_through"],
+                    value["findings"],
+                    worker_selections=value.get("worker_selections", []),
+                )
             elif task["role"] == "planner" and task["plan_id"]:
                 if store.install_graph(task["plan_id"], task["id"], value):
                     plan = store.plan(task["plan_id"])
@@ -415,6 +493,33 @@ def _reconcile(store: Store, launchers: dict) -> None:
             del launchers[task_id]
 
 
+def _seed_approved_plans(store, workers):
+    """A project's seeding error must not stop other projects' background work."""
+    for project in store.projects():
+        for plan in store.snapshot(project["id"])["plans"]:
+            if plan["status"] != "approved":
+                continue
+            key = "worker-seed-error:" + plan["id"]
+            try:
+                workers.seed_plan(plan["id"])
+            except (ValueError, OSError, RuntimeError) as error:
+                message = str(error)[:2000]
+                if store.service_value(key) != message:
+                    with store.transaction() as database:
+                        store._event(
+                            database,
+                            project["id"],
+                            "worker.seeding_failed",
+                            {"plan_id": plan["id"], "error": message},
+                            notify=True,
+                            review_required=False,
+                        )
+                    store.set_service_value(key, message)
+            else:
+                if store.service_value(key):
+                    store.set_service_value(key, "")
+
+
 def supervise(home: Path, once: bool = False) -> None:
     store = Store(home)
     launchers = {}
@@ -436,6 +541,11 @@ def supervise(home: Path, once: bool = False) -> None:
                 )
                 _reconcile(store, launchers)
                 _process_results(store)
+                from .workers import WorkerService
+
+                workers = WorkerService(store)
+                _seed_approved_plans(store, workers)
+                workers.dispatch_ready()
                 for project in store.projects():
                     project_config = load_config(store.home, project["id"])
                     settings = project_config["supervisor"]
@@ -447,6 +557,9 @@ def supervise(home: Path, once: bool = False) -> None:
                             {
                                 "reviewed_through": candidate["cursor"],
                                 "events": candidate["events"],
+                                "worker_requests": workers.monitor_requests(
+                                    project["id"], candidate["cursor"]
+                                ),
                                 "state": store.snapshot(project["id"]),
                                 "notes": [
                                     store.read_note(project["id"], name)

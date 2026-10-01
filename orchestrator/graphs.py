@@ -33,6 +33,7 @@ STATES = frozenset(
         "blocked",
         "approved",
         "unknown",
+        "awaiting_review",
     }
 )
 FAILURES = frozenset({"failed", "cancelled", "blocked"})
@@ -65,6 +66,7 @@ def planning_schema() -> dict:
         },
         "acceptance_criteria": {**text_list, "minItems": 1},
         "kind": {"type": "string", "enum": ["work", "review", "approval"]},
+        "mode": {"type": "string", "enum": ["read", "write"], "default": "read"},
     }
     properties = {
         "summary": text,
@@ -78,7 +80,7 @@ def planning_schema() -> dict:
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": list(node_properties),
+                "required": [key for key in node_properties if key != "mode"],
                 "properties": node_properties,
             },
         },
@@ -156,7 +158,9 @@ def validate_plan(value: dict) -> dict:
     identifiers = set()
     for node in value["nodes"]:
         _object(
-            node,
+            {key: item for key, item in node.items() if key != "mode"}
+            if type(node) is dict
+            else node,
             ("id", "title", "description", "depends_on", "acceptance_criteria", "kind"),
             "node",
         )
@@ -168,6 +172,10 @@ def validate_plan(value: dict) -> dict:
         _text(node["description"], "node.description")
         if type(node["kind"]) is not str or node["kind"] not in ("work", "review", "approval"):
             raise GraphError("node.kind must be work, review, or approval")
+        if node.get("mode", "read") not in ("read", "write"):
+            raise GraphError("node.mode must be read or write")
+        if node.get("mode") == "write" and node["kind"] != "work":
+            raise GraphError("Only work nodes can request write mode")
         _list(node["acceptance_criteria"], "node.acceptance_criteria", 1)
         for criterion in node["acceptance_criteria"]:
             _text(criterion, "node.acceptance_criteria")

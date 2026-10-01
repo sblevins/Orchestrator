@@ -89,7 +89,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "orchestrator", label: "Orchestrator",
-    description: "Use shared project state. Actions: projects, register_project, bind_project, status, start_plan, task, cancel_task, updates, acknowledge, record_decision, read_note, write_note, graph, workflows, request_review, pause_project, resume_project. Acknowledge event_ids only after addressing findings. Session identity is provided by the bridge, never by payload.",
+    description: "Use shared project state. Actions: projects, register_project, bind_project, status, start_plan, task, cancel_task, updates, acknowledge, record_decision, read_note, write_note, graph, workflows, request_review, pause_project, resume_project, routing_policy, request_worker, worker, workers, select_worker, refresh_worker_policy. Workers run as tracked background sub-agents, never Herder tabs or windows. Approvals remain operator-only; requesting or selecting a worker does not grant approval. Acknowledge event_ids only after addressing findings. Session identity is provided by the bridge, never by payload.",
     parameters: Type.Object({ action: Type.String(), payload: Type.Optional(Type.Record(Type.String(), Type.Unknown())) }),
     async execute(_id, parameters, signal) {
       const response = await request(parameters.action, parameters.payload ?? {}, signal);
@@ -160,7 +160,8 @@ export default function (pi: ExtensionAPI) {
         (entry.data as { pid?: number; sessionId?: string })?.pid === process.pid &&
         (entry.data as { sessionId?: string })?.sessionId === sessionId);
       if (!launched && !initialized) {
-        const provider = ({ claude: "anthropic", codex: "openai-codex" } as Record<string, string>)[role.adapter];
+        const provider = role.adapter === "claude" ? "anthropic" :
+          role.adapter === "pi" && typeof role.provider === "string" && role.provider.trim() ? role.provider : undefined;
         const model = provider && ctx.modelRegistry.find(provider, role.model);
         if (!model) throw new Error(`Configured Orchestrator model not found: ${provider || role.adapter}/${role.model}`);
         if (!(await pi.setModel(model))) throw new Error(`Authentication unavailable for Orchestrator model: ${provider}/${role.model}`);

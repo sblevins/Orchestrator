@@ -2,50 +2,64 @@
 
 ## Goal
 
-A fast, project-bound conversational coordinator for Claude Code and Pi, with independent planning and criticism, a slow ongoing monitor, and eventual temporary workers chosen under First Mate's routing guidelines.
-The deterministic supervisor owns task state and dependency enforcement.
-Plain version: models decide what to do, while ordinary software remembers the work and prevents tasks from starting too early.
+A fast, project-bound conversational coordinator for Claude Code and Pi, with independent planning and criticism, a slow ongoing monitor, and temporary workers chosen under First Mate's routing guidelines.
+The deterministic supervisor owns task state and dependency enforcement, with explicit operator authorization and acceptance before work advances.
+Plain version: models propose and perform work, while software remembers it and waits for your approval when required.
 
 ## Implemented
 
 The local Python/SQLite foundation supports project/session ownership, notes, durable events and inboxes, graph validation/readiness, planner-to-critic handoff, bounded revisions, monitor review cursors, blocking holds, and explicit operator approval.
 Detached resource-reserved runners have deadlines, cancellation, process-identity checks, strict result parsing, and restart reconciliation.
-Claude Code hooks/MCP and the owned Pi extension use this same state instead of separate task lists.
-All user prompts are saved; conservative exact-match filtering avoids waking expensive review for simple status questions.
-Core role models, efforts, resource limits, personalization, and workflow templates are configurable.
-The agreed four-role defaults are tracked in `config/default.toml`; per-role dollar budget, timeout, CPU, and memory parameters have been removed.
-Shared supervisor settings retain automatic resource reservations and task deadlines.
-The public visual explainer is exported in `docs/explainer/` and linked from the README.
-The current First Mate reference was pulled and audited at `8f756bbc287c5bdfacc64a7cc09e8516c64fc919`.
+Claude Code hooks/MCP and the owned Pi extension share this state.
+Shared supervisor settings retain resource reservations and task deadlines, without per-role dollar caps.
+The public static explainer in `docs/explainer/` retains its theme, layout, and diagram without a feedback server or private runtime data.
+
+The worker implementation in the current feature worktree enables routing and execution without supplying any worker model defaults.
+Project `.orchestrator/crew-dispatch.json` policy, explicit profile selection, and authorization gates are required before dispatch.
+The slow monitor selects plan work; the foreground selects unrelated work.
+Write workers use isolated worktrees and produce signed local candidates, not automatic source-branch merges or pushes.
+Operator plan approval authorizes declared write nodes; unrelated writes and policy-required approvals require worker approval.
+Explicit result acceptance completes graph nodes and unlocks dependent work.
+See [workers](workers.md) for policy setup, authority, and acceptance.
+Plain version: a worker can prepare changes separately, but finishing the job does not approve those changes.
+
+Claude Code executes Anthropic models only; other models use the owned Pi SDK bridge pinned to 0.99.2.
+The critic is Pi `openai-codex` / `gpt-6-astra` / `high`.
+Pi verifies the exact model, effort, and tool allowlist without silent fallback, uses fresh ephemeral sessions without resume, and reuses canonical auth without inherited plugins.
+Worker tools permit reading and file edits only, not shell commands or tests.
+See [adapters](adapters.md) for execution and authentication boundaries.
 
 ## Validation
 
-The 143 passing offline tests exercise real subprocesses with fake model harnesses, including frontend disconnect/reconnect, large prompt transport, native Claude clear/resume identity, private-home hooks, graph constraints, stale scope fencing, and transaction-boundary recovery.
-Python lint and formatting are checked with Ruff.
-Installed Pi auto-discovery is tested through its actual RPC mode, without launcher variables, an explicit extension flag, or inference.
-Native Claude project MCP discovery is verified with its CLI; process-based clear/resume identity is exercised with real subprocess fixtures.
-Running `claude` or `pi` in the repository initializes the coordinator automatically.
-The global Claude foreground model pin remains unchanged; native `/model` selection or the optional launcher is required to override it.
+Last verified 2026-10-01: all 238 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
+The suite includes real CLI worker selection/approval/acceptance, monitor-owned planned dispatch, dependency gating, signed isolated write results, and local Pi SDK tests against a loopback-only fake provider.
+The subprocess lifecycle tests also passed three consecutive runs after correcting a cleanup lock race.
+Ruff lint/format, Node syntax, and `git diff --check` passed.
+Independent review findings were reproduced and fixed: stale dependency reads, oversized valid plan seeding, and cancellation during final launch preparation.
+Policy special-file handling and failed SQLite connection cleanup also have regression coverage.
 These checks do not prove paid model access, answer quality, native microphone behavior, or live Claude idle wakeup.
+Plain version: the local checks passed, but real provider access and interactive behavior still need separate verification.
 
 ## Explicitly pending
 
-- First Mate worker router import, configurable dispatch profiles, and selection-authority enforcement.
-- Worker launch, steering, implementation isolation, acceptance verification, and graph execution transitions.
-- A user decision on third-party Pi orchestration plugins and any shared graph UI.
-- Live model/effort acceptance and native Claude voice/wake checks in the user's terminal.
-- Workload-specific evaluation of latency, missed decisions, monitoring quality, and costs.
-- Optional OS-managed supervisor restart after a crash or reboot.
+- A supported sanitized quota evidence adapter is unavailable, so quota-dependent candidate arrays, floors, and quota-balanced selection fail closed.
+- Operator-chosen worker profiles must be populated; there are no automatic worker model defaults.
+- Live exact-model/effort acceptance, native Claude voice/wake checks, and workload-specific quality, latency, and cost evaluation remain unverified.
+- Optional OS-managed supervisor restart and any third-party Pi orchestration plugin or shared graph UI remain outside the current implementation.
 
-The current supervisor is single-host, not a distributed Temporal deployment.
-Its state survives restart; reconnecting starts the supervisor, but there is no installed boot service.
+The supervisor is single-host, not a distributed Temporal deployment, and has no installed boot service.
 Unknown work is not blindly replayed.
-Claude reports harness costs, whose resumed-session scope still needs live verification; these must not be summed as verified per-turn spending.
-Codex dollar cost remains unknown; no per-role dollar cap is configured for either adapter.
-Read-only harness configuration is not hostile-process isolation against other programs using the same operating-system account.
+Claude's reported resumed-session costs must not be summed as verified per-turn spending; Pi dollar cost remains unknown.
+File-tool controls are not an operating-system sandbox against hostile same-user processes.
+Plain version: missing quota information stops quota-based selection, and limited model tools do not isolate other programs on the machine.
 
 ## Next decision
 
-Try the native frontend and planning lifecycle first.
-Then configure First Mate's worker guidelines, keeping plan workers selected by the monitor and unrelated workers selected by the orchestrator.
-Workers remain disabled until that separate implementation is complete.
+Configure the desired worker profiles, then verify live access and review a candidate before explicitly accepting it.
+Quota-dependent policy must wait for supported evidence or an explicit operator override; it must not silently choose another profile.
+
+## In flight
+
+`feature/worker-router` in `worktrees/worker-router` has completed implementation, independent review, and local validation.
+Integration and GitHub CI verification are pending.
+No other unfinished feature worktree or open pull request was found in the current repository evidence.

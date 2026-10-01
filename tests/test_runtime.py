@@ -10,13 +10,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from orchestrator.config import load_config
 from orchestrator.runtime import (
     _process_results,
     _reconcile,
     _resume_session,
+    _seed_approved_plans,
     _strict_json,
     ensure_supervisor,
     process_identity,
@@ -127,6 +128,33 @@ os.execv(arguments[0], arguments)
             time.sleep(0.03)
         self.fail(f"Task never reached {states}: {self.store.task(task_id)}")
 
+    def test_seeding_error_is_durable_and_does_not_stop_other_projects(self):
+        self.store.add_project("other", str(self.home))
+        self.store.open_session("other-session", "test", "other")
+        first = self.store.create_plan("session", "First", self.config)
+        second = self.store.create_plan("other-session", "Second", self.config)
+        with self.store.transaction() as database:
+            database.execute("UPDATE plans SET status='approved'")
+        workers = Mock()
+
+        def seed(plan_id):
+            if plan_id == first["id"]:
+                raise ValueError("Fixture seeding failure")
+
+        workers.seed_plan.side_effect = seed
+        _seed_approved_plans(self.store, workers)
+        _seed_approved_plans(self.store, workers)
+        self.assertEqual(workers.seed_plan.call_args_list.count(((second["id"],), {})), 2)
+        errors = [
+            event
+            for event in self.store.events("project")
+            if event["kind"] == "worker.seeding_failed"
+        ]
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(
+            any(event["id"] == errors[0]["id"] for event in self.store.updates("session"))
+        )
+
     def test_identity(self):
         self.assertIsNotNone(process_identity(os.getpid()))
         self.assertIsNone(process_identity(999999999))
@@ -158,18 +186,10 @@ if '-p' in sys.argv:
     assert (project / 'source.txt').read_text() == 'project source'
     print(json.dumps({'type':'result', 'subtype':'success', 'is_error':False,
                       'result':'{}', 'session_id':'conversation', 'total_cost_usd':0}))
-else:
-    assert sys.argv[-2:] == ['--', '-']
-    assert '--ignore-user-config' in sys.argv and '--ignore-rules' in sys.argv
-    assert sys.argv[sys.argv.index('-s') + 1] == 'read-only'
-    print(json.dumps({'type':'thread.started', 'thread_id':'conversation'}))
-    print(json.dumps({'type':'item.completed', 'item':
-                      {'id':'final', 'type':'agent_message', 'text':'{}'}}))
-    print(json.dumps({'type':'turn.completed', 'usage':{}}))
 """)
         self.harness.chmod(0o700)
         (self.root / "source.txt").write_text("project source")
-        for adapter in ("claude", "codex"):
+        for adapter in ("claude",):
             with self.subTest(adapter=adapter):
                 self.config["roles"]["planner"]["adapter"] = adapter
                 self.config["adapters"][adapter]["command"] = [str(self.harness)]

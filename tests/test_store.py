@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from orchestrator.intake import needs_review
 from orchestrator.store import StateError, Store
@@ -30,6 +31,22 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(self.store.runner_started(task["id"], task["token"], 123, "identity"))
         self.assertTrue(self.store.finish(task["id"], task["token"], text=text))
         return self.store.task(task["id"])
+
+    def test_failed_connection_setup_closes_database(self):
+        class FailingConnection(sqlite3.Connection):
+            def execute(self, *args, **kwargs):
+                if args[0] == "PRAGMA synchronous=FULL":
+                    raise sqlite3.OperationalError("database is locked")
+                return super().execute(*args, **kwargs)
+
+        connection = sqlite3.connect(self.store.database, factory=FailingConnection)
+        with (
+            patch("orchestrator.store.sqlite3.connect", return_value=connection),
+            self.assertRaisesRegex(sqlite3.OperationalError, "locked"),
+        ):
+            self.store.connect()
+        with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+            connection.execute("SELECT 1")
 
     def test_project_and_session_isolation(self):
         with self.assertRaises(StateError):

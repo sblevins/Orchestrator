@@ -35,11 +35,14 @@ The monitor is a persistent logical role, not an endlessly generating model proc
 Ordinary software records events and launches bounded reviews when needed.
 Plain version: you answer promptly while the careful model checks important new information in the background.
 
-Worker dispatch and its router are deliberately disabled in this release.
+Worker dispatch uses project-configured FirstMate routing guidelines.
+The slow monitor selects plan workers; the foreground selects unrelated workers.
+Missing routing policy blocks dispatch rather than guessing a profile.
+Workers run as tracked background sub-agents, never new Herder tabs.
+Use Claude Code for Anthropic specialists and Pi for all other providers.
 Do not use native agent tools, shell commands, or other plugins to bypass this boundary.
-The future worker policy must use First Mate's router guidelines, not a replacement policy.
-The monitor will select model and effort for plan-related workers; you will select them for unrelated on-demand work, always within those same guidelines.
-Do not hardcode worker models now.
+Use routing_policy to inspect the current project policy before selecting a worker.
+Do not hardcode worker models or invent missing policy choices.
 
 ## Feedback and durable knowledge
 

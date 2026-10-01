@@ -12,7 +12,7 @@ No First Mate code was copied into this implementation.
 - One active coordinator per project: immutable instance binding, observer sessions, and explicit takeover.
 - Private project memory: canonical project roots, named notes, compare-and-swap revisions, and separate operating data.
 - Saved feedback before notification: per-session inboxes, exact event acknowledgment, and redelivery after reconnect.
-- Background supervision: detached runners, bounded monitor calls, resumable monitor conversations, and cheap polling between calls.
+- Background supervision: detached runners, bounded monitor calls, resumable Claude monitor conversations, fresh Pi tasks, and cheap polling between calls.
 - User-dialog mirroring: complete saved prompts, conservative review classification, and recorded consequential decisions.
 - Failure handling: cancellation, deadlines, process-start identity checks, unknown-outcome reporting, monitor cooldowns, and no blind replay.
 - Human control: blocking findings, explicit approval commands, project pause, and no model-facing approval tool.
@@ -31,11 +31,16 @@ Configuration supports local and per-project preferences, replaceable workflow t
 The monitor cannot hide a blocking finding by acknowledging a notification.
 Routine status prompts are saved without automatically paying for a deep review.
 
+FirstMate-compatible project profiles now guide worker selection, with no automatically populated model defaults.
+The monitor selects plan workers; the orchestrator selects unrelated workers, both using best-fit natural-language rules rather than ordered keyword matches.
+Workers are tracked background sub-agents, without terminal tabs, and code changes remain in isolated worktrees until separately reviewed and integrated.
+Program-enforced approval and acceptance gates prevent models from releasing their own dependencies.
+Plain version: workers follow your policy and keep their changes separate until you accept them.
+
 ## Deferred or intentionally excluded
 
-First Mate worker dispatch profiles are reserved but not imported, populated, or executed yet.
-The future monitor selects plan workers; the orchestrator selects unrelated workers, both within those profiles.
-Worker steering, worktree mutation leases, implementation verification, automatic shipping, forge workflows, quota-aware account failover, and worker cost aggregation belong with that later execution phase.
+Quota-dependent candidate arrays, floors, and quota-balanced choices fail closed until a supported sanitized quota adapter exists.
+Active mid-turn steering, automated test execution, automatic shipping, forge workflows, quota-aware account failover, and worker cost aggregation are not implemented.
 
 Fleet hierarchies, cross-home handoffs, task-axi/Beads adoption, automatic tool updates, social integrations, custom voice services, and third-party Pi graph plugins are not required for the initial local coordinator.
 No plugin choice has been made for the user.

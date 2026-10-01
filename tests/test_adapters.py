@@ -70,7 +70,12 @@ class CommandTests(unittest.TestCase):
 
     def test_all_role_commands_have_no_spending_cap(self):
         for role in self.config["roles"]:
-            for session in (None, "saved-session"):
+            sessions = (
+                (None,)
+                if self.config["roles"][role]["adapter"] == "pi"
+                else (None, "saved-session")
+            )
+            for session in sessions:
                 for stdin_prompt in (False, True):
                     with self.subTest(role=role, session=session, stdin=stdin_prompt):
                         command = build_command(
@@ -99,23 +104,37 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(command[command.index("--tools") + 1], ",".join(tools))
             self.assertEqual(command[command.index("--allowedTools") + 1], ",".join(tools))
 
-    def test_codex_explicit_policy(self):
+    def test_pi_explicit_policy(self):
         command = self.command("critic", "--hostile prompt")
-        self.assertEqual(command[:6], ["codex", "-a", "never", "exec", "-s", "read-only"])
-        self.assertEqual(command[command.index("-m") + 1], "gpt-6-astra")
-        self.assertEqual(command[command.index("-C") + 1], str(self.home))
-        self.assertEqual(command[command.index("-c") + 1], 'model_reasoning_effort="high"')
-        self.assertEqual(command[command.index("--output-last-message") + 1], str(self.output))
-        self.assertEqual(command[-2:], ["--", "--hostile prompt"])
-        self.assertNotIn("--max-budget-usd", command)
-        self.assertIn("--ignore-user-config", command)
-        self.assertIn("--ignore-rules", command)
+        self.assertEqual(command[1], "-I")
+        self.assertTrue(command[2].endswith("/orchestrator/pi_tools.py"))
+        self.assertEqual(command[3], "launch")
+        options = json.loads(command[4])
+        self.assertEqual(options["provider"], "openai-codex")
+        self.assertEqual(options["model"], "gpt-6-astra")
+        self.assertEqual(options["effort"], "high")
+        self.assertEqual(options["cwd"], str(self.home))
+        self.assertEqual(options["prompt"], "--hostile prompt")
+        self.assertEqual(set(options["tools"]), {"read", "ls", "find", "grep"})
+        self.assertNotIn("codex", command)
 
     def test_stdin_prompt_and_project_access_preserve_policy(self):
         project = self.home / "project with spaces"
         for session in (None, "saved-session"):
             for role in ("planner", "critic"):
                 with self.subTest(role=role, session=session):
+                    if role == "critic" and session is not None:
+                        with self.assertRaisesRegex(AdapterError, "ephemeral"):
+                            build_command(
+                                self.config,
+                                role,
+                                "large prompt",
+                                self.home,
+                                self.output,
+                                session,
+                                stdin_prompt=True,
+                            )
+                        continue
                     command = build_command(
                         self.config,
                         role,
@@ -135,11 +154,10 @@ class CommandTests(unittest.TestCase):
                         if session:
                             self.assertEqual(command[-2:], ["--resume", session])
                     else:
-                        expected = ["--", session, "-"] if session else ["--", "-"]
-                        self.assertEqual(command[-len(expected) :], expected)
-                        self.assertEqual(command[command.index("-s") + 1], "read-only")
-                        self.assertIn("--ignore-user-config", command)
-                        self.assertIn("--ignore-rules", command)
+                        options = json.loads(command[-1])
+                        self.assertNotIn("prompt", options)
+                        self.assertEqual(options["mode"], "read")
+                        self.assertEqual(options["project_root"], str(project))
         self.assertNotIn("--add-dir", self.command())
         with self.assertRaises(AdapterError):
             build_command(
@@ -154,11 +172,8 @@ class CommandTests(unittest.TestCase):
     def test_resume_keeps_policy_and_exact_session(self):
         claude = self.command(session_id="saved-claude")
         self.assertEqual(claude[claude.index("--resume") + 1], "saved-claude")
-        codex = self.command("critic", session_id="saved-codex")
-        self.assertEqual(codex[-3:], ["--", "saved-codex", "review"])
-        self.assertLess(codex.index("-s"), codex.index("resume"))
-        self.assertIn("--output-last-message", codex)
-        self.assertIn("--json", codex)
+        with self.assertRaisesRegex(AdapterError, "ephemeral"):
+            self.command("critic", session_id="saved-pi")
 
     def test_validation_no_fallback_or_mutation(self):
         original = deepcopy(self.config)
@@ -182,9 +197,9 @@ class CommandTests(unittest.TestCase):
         for session in ("", "-last", "\x00"):
             with self.subTest(session=session), self.assertRaises(AdapterError):
                 self.command(session_id=session)
-        for session in (None, "saved"):
-            with self.assertRaises(AdapterError):
-                self.command("critic", "-", session)
+        self.assertEqual(json.loads(self.command("critic", "-")[-1])["prompt"], "-")
+        with self.assertRaises(AdapterError):
+            self.command("critic", "-", "saved")
         with self.assertRaises(AdapterError):
             self.command("worker")
 
@@ -209,7 +224,7 @@ class CommandTests(unittest.TestCase):
         )
         executable.chmod(0o700)
         prompt = '--dangerously-skip-permissions; $(touch SHOULD_NOT_EXIST)\n"quotes"'
-        for role, adapter in (("planner", "claude"), ("critic", "codex")):
+        for role, adapter in (("planner", "claude"),):
             self.config["adapters"][adapter]["command"] = [str(executable)]
             command = self.command(role, prompt)
             result = subprocess.run(

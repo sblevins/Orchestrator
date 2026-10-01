@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import uuid
@@ -11,7 +12,91 @@ from .config import load_config
 from .intake import needs_review
 from .store import NOTE_NAMES, StateError, Store, atomic_write, encode, now
 
-READ_ACTIONS = {"projects", "status", "task", "updates", "read_note", "graph", "workflows"}
+READ_ACTIONS = {
+    "projects",
+    "status",
+    "task",
+    "updates",
+    "read_note",
+    "graph",
+    "workflows",
+    "routing_policy",
+    "worker",
+    "workers",
+}
+WORKER_ACTIONS = {
+    "routing_policy",
+    "request_worker",
+    "worker",
+    "workers",
+    "select_worker",
+    "refresh_worker_policy",
+}
+
+
+def _worker_request(store, session_id, project_id, action, payload):
+    from .workers import WorkerService
+
+    fields, required = FIELDS[action]
+    if set(payload) - set(fields) or any(field not in payload for field in required):
+        raise StateError("Worker arguments do not match the declared fields")
+    for field, kind in fields.items():
+        if (
+            field in payload
+            and type(payload[field])
+            is not {
+                "string": str,
+                "integer": int,
+                "object": dict,
+            }[kind]
+        ):
+            raise StateError(f"{field} must have type {kind}")
+    request_id = None
+    if action in {"worker", "select_worker", "refresh_worker_policy"}:
+        request_id = _text(payload, "request_id", 96)
+        # Check ownership using only metadata before reading the saved result or policy.
+        with contextlib.closing(store.connect()) as database:
+            row = database.execute(
+                "SELECT project_id FROM worker_requests WHERE id=?", (request_id,)
+            ).fetchone()
+        if not row or row["project_id"] != project_id:
+            raise StateError("Unknown worker request in this project")
+    if action == "request_worker":
+        if payload.get("mode", "read") not in {"read", "write"}:
+            raise StateError("mode must be read or write")
+        if bool(payload.get("plan_id")) != bool(payload.get("node_id")):
+            raise StateError("plan_id and node_id must be supplied together")
+        if "plan_id" in payload and store.plan(payload["plan_id"])["project_id"] != project_id:
+            raise StateError("Plan belongs to another project")
+        with contextlib.closing(store.connect()) as database:
+            origin = database.execute(
+                "SELECT project_id,kind FROM events WHERE id=?", (payload["origin_event_id"],)
+            ).fetchone()
+        if not origin or origin["project_id"] != project_id or origin["kind"] != "user.message":
+            raise StateError("origin_event_id must identify a user message in this project")
+    workers = WorkerService(store)
+    if action == "routing_policy":
+        return workers.policy(project_id)
+    if action == "workers":
+        return {"workers": workers.list(project_id)}
+    if action == "worker":
+        return workers.get(request_id)
+    if action == "request_worker":
+        result = workers.request(
+            session_id,
+            _text(payload, "brief"),
+            payload.get("mode", "read"),
+            origin_event_id=payload["origin_event_id"],
+            plan_id=payload.get("plan_id"),
+            node_id=payload.get("node_id"),
+            idempotency_key=payload.get("idempotency_key"),
+        )
+    elif action == "select_worker":
+        result = workers.select(session_id, request_id, payload["choice"])
+    else:
+        result = workers.refresh(session_id, request_id)
+    _start_service(store.home)
+    return result
 
 
 def _text(payload, field, maximum=100000):
@@ -128,6 +213,8 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
     session, project_id = _bound(
         store, session_id, writer=action not in READ_ACTIONS | {"acknowledge"}
     )
+    if action in WORKER_ACTIONS:
+        return _worker_request(store, session_id, project_id, action, payload)
     config = load_config(home, project_id)
     if action == "status":
         state = store.snapshot(project_id)
@@ -200,11 +287,27 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
     if action == "resume_project":
         store.resume(project_id)
         return {"paused": False}
-    raise StateError(f"Unknown operation {action!r}; worker routing remains disabled")
+    raise StateError(f"Unknown operation {action!r}")
 
 
 # The transport validates JSON schema where available; request() also checks state and values.
 FIELDS = {
+    "routing_policy": ({}, []),
+    "request_worker": (
+        {
+            "brief": "string",
+            "origin_event_id": "integer",
+            "mode": "string",
+            "plan_id": "string",
+            "node_id": "string",
+            "idempotency_key": "string",
+        },
+        ["brief", "origin_event_id"],
+    ),
+    "worker": ({"request_id": "string"}, ["request_id"]),
+    "workers": ({}, []),
+    "select_worker": ({"request_id": "string", "choice": "object"}, ["request_id", "choice"]),
+    "refresh_worker_policy": ({"request_id": "string"}, ["request_id"]),
     "projects": ({}, []),
     "register_project": ({"project_id": "string", "root": "string"}, ["project_id", "root"]),
     "bind_project": ({"project_id": "string"}, ["project_id"]),
@@ -230,6 +333,12 @@ FIELDS = {
     "resume_project": ({}, []),
 }
 DESCRIPTIONS = {
+    "routing_policy": "Inspect project worker policy and selection procedure; configuration is required before routing.",
+    "request_worker": "Request tracked work tied to its original user event; defaults to read-only. Plan work is selected by the monitor.",
+    "worker": "Inspect a project worker request and candidate result; only operator acceptance completes work.",
+    "workers": "List this project's worker requests.",
+    "select_worker": "Select a concrete policy profile for unrelated work only; cannot approve writes or override policy.",
+    "refresh_worker_policy": "Refresh a not-running request's policy snapshot, invalidating its old selection and approval.",
     "projects": "List registered projects before binding this coordinator instance.",
     "register_project": "Register a project directory explicitly identified by the user; never guess ambiguous paths.",
     "bind_project": "Permanently bind this instance to one registered project and load its current state and notes.",
@@ -254,6 +363,8 @@ def tool_definitions(require_session: bool) -> list[dict]:
     tools = []
     for name, (fields, required) in FIELDS.items():
         properties = {field: {"type": kind} for field, kind in fields.items()}
+        if "mode" in properties:
+            properties["mode"].update(enum=["read", "write"], default="read")
         if "event_ids" in properties:
             properties["event_ids"]["items"] = {"type": "integer"}
         required = list(required)

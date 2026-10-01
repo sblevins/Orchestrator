@@ -29,6 +29,7 @@ const entries = [];
 const calls = [];
 const notices = [];
 let tools, tool, selections = 0, effort, modelExists = true, authenticate = true;
+let roleAdapter = 'claude', configuredProvider, expectedProvider = 'anthropic';
 const api = {
   on: (name, callback) => handlers.set(name, callback),
   registerTool: value => {tool = value;},
@@ -44,7 +45,7 @@ const api = {
       assert.equal(args[args.indexOf('--session') + 1], 'native-session');
       assert.equal(args[args.indexOf('--pid') + 1], String(process.pid));
       return {code: 0, stdout: JSON.stringify({session: {id: 'native-session'},
-        config: {roles: {orchestrator: {adapter: 'claude', model: 'configured', effort: 'low', allowed_tools: ['Read', 'Glob', 'Grep']}}},
+        config: {roles: {orchestrator: {adapter: roleAdapter, provider: configuredProvider, model: 'configured', effort: 'low', allowed_tools: ['Read', 'Glob', 'Grep']}}},
         instructions: 'Role instructions\nPersonalization\nProject context'})};
     }
     if (args.includes('close')) return {code: 0, stdout: '{}'};
@@ -57,7 +58,7 @@ const api = {
 };
 const ctx = {hasUI: true, mode: 'rpc', ui: {notify: message => notices.push(message)},
   sessionManager: {getSessionId: () => 'native-session', getBranch: () => entries},
-  modelRegistry: {find(provider, id) {assert.equal(provider, 'anthropic'); assert.equal(id, 'configured'); return modelExists ? {id} : undefined;}},
+  modelRegistry: {find(provider, id) {assert.equal(provider, expectedProvider); assert.equal(id, 'configured'); return modelExists ? {id} : undefined;}},
   abort() {throw Error('Unexpected abort');}
 };
 extension(api);
@@ -98,6 +99,34 @@ await handlers.get('session_start')({}, ctx);
 assert.deepEqual(tools, []);
 assert(notices.some(message => /Authentication unavailable/.test(message)));
 await handlers.get('session_shutdown')({}, ctx);
+authenticate = true;
+roleAdapter = 'pi';
+configuredProvider = 'openai-codex';
+expectedProvider = configuredProvider;
+entries.length = 0;
+const previousSelections = selections;
+extension(api);
+await handlers.get('session_start')({}, ctx);
+assert.equal(selections, previousSelections + 1);
+assert.deepEqual(new Set(tools), new Set(['read', 'find', 'ls', 'grep', 'orchestrator']));
+for (const action of ['routing_policy', 'request_worker', 'worker', 'workers', 'select_worker', 'refresh_worker_policy']) {
+  assert(tool.description.includes(action));
+}
+assert.match(tool.description, /tracked background sub-agents/);
+assert.match(tool.description, /never Herder tabs or windows/);
+assert.match(tool.description, /operator-only/);
+await handlers.get('session_shutdown')({}, ctx);
+for (const invalidProvider of [undefined, '', ' ', false]) {
+  entries.length = 0;
+  configuredProvider = invalidProvider;
+  const selectionCount = selections;
+  extension(api);
+  await handlers.get('session_start')({}, ctx);
+  assert.deepEqual(tools, []);
+  assert.equal(selections, selectionCount);
+  assert.equal((await handlers.get('tool_call')({toolName: 'read'}, ctx)).block, true);
+  await handlers.get('session_shutdown')({}, ctx);
+}
 console.log('native lifecycle passed');
 """
 
@@ -150,7 +179,10 @@ class NativePiTests(unittest.TestCase):
             self.assertIn("native lifecycle passed", completed.stdout)
 
     def test_installed_pi_discovers_native_extension_without_launcher(self):
-        for configured_model in ("native-offline-fixture", "nonexistent-orchestrator-model"):
+        for configured_model in (
+            "claude-native-offline-fixture",
+            "claude-nonexistent-orchestrator-model",
+        ):
             with self.subTest(model=configured_model), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary)
                 project = directory / "Orchestrator"
@@ -189,7 +221,9 @@ class NativePiTests(unittest.TestCase):
                                     "baseUrl": "http://127.0.0.1:1",
                                     "api": "anthropic-messages",
                                     "apiKey": "offline-test-only",
-                                    "models": [{"id": "native-offline-fixture", "reasoning": True}],
+                                    "models": [
+                                        {"id": "claude-native-offline-fixture", "reasoning": True}
+                                    ],
                                 }
                             }
                         }
@@ -229,7 +263,7 @@ class NativePiTests(unittest.TestCase):
                 try:
                     response, observed = request({"id": "state", "type": "get_state"})
                     self.assertTrue(response["success"], response)
-                    if configured_model == "native-offline-fixture":
+                    if configured_model == "claude-native-offline-fixture":
                         self.assertEqual(response["data"]["model"]["id"], configured_model)
                         self.assertEqual(response["data"]["thinkingLevel"], "low")
                     else:

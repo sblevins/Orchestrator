@@ -63,6 +63,19 @@ class ValidationTests(unittest.TestCase):
         validated["nodes"][0]["acceptance_criteria"].append("Changed")
         self.assertEqual(source, original)
 
+    def test_write_mode_requires_work_node_and_results_need_acceptance(self):
+        graph = plan({**node("edit"), "mode": "write"}, node("review", ["edit"], "review"))
+        self.assertEqual(validate_plan(graph), graph)
+        states = {"edit": "awaiting_review"}
+        self.assertEqual(ready_nodes(graph, states)["ready"], [])
+        self.assertEqual(ready_nodes(graph, {"edit": "completed"})["ready"], ["review"])
+        for kind in ("review", "approval"):
+            with self.assertRaises(GraphError):
+                validate_plan(plan({**node("root", kind=kind), "mode": "write"}))
+        for mode in ("execute", True, {}, None):
+            with self.assertRaises(GraphError):
+                validate_plan(plan({**node("root"), "mode": mode}))
+
     def test_duplicates_missing_dependencies_and_cycles(self):
         invalid = [
             plan(node("a"), node("a")),

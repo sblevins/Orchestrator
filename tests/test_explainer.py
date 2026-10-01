@@ -17,6 +17,7 @@ class PageInventory(HTMLParser):
         self.links = []
         self.assets = []
         self.role_rows = {}
+        self.providers = {}
         self.current_role = None
         self.current_cell = None
         self.current_model = None
@@ -28,6 +29,8 @@ class PageInventory(HTMLParser):
         if tag == "tr" and "data-role" in attributes:
             self.current_role = attributes["data-role"]
             self.role_rows[self.current_role] = {"cells": [], "model": ""}
+        if self.current_role and "data-provider" in attributes:
+            self.providers[self.current_role] = attributes["data-provider"]
         if self.current_role and tag in {"th", "td"}:
             self.current_cell = []
         if self.current_role and tag == "code":
@@ -91,10 +94,50 @@ class ExplainerTests(unittest.TestCase):
                     row["cells"][1].split(" · ", 1)[0],
                     settings["adapter"].capitalize() + " adapter",
                 )
-        self.assertFalse(configuration["workers"]["enabled"])
-        self.assertFalse(configuration["routing"]["enabled"])
-        self.assertIn("Worker routing and worker execution are disabled", self.page)
+                if "provider" in settings:
+                    self.assertEqual(self.inventory.providers[role], settings["provider"])
+        self.assertTrue(configuration["workers"]["enabled"])
+        self.assertTrue(configuration["routing"]["enabled"])
+        self.assertEqual(configuration["routing"]["rules"], [])
+        self.assertNotIn("worker", configuration["roles"])
+        self.assertIn("Worker routing and worker execution are enabled", self.page)
+        self.assertIn("There are no worker model defaults.", self.page)
         self.assertIn("Fable is only an alternative", self.page)
+
+    def test_worker_authority_and_execution_limits_are_explicit(self):
+        for statement in (
+            ".orchestrator/crew-dispatch.json",
+            "Missing or invalid policy blocks dispatch",
+            "The slow monitor selects plan work; the foreground orchestrator selects unrelated work",
+            "Claude Code executes only Anthropic models",
+            "owned Pi SDK bridge executes other models",
+            "Exact model and effort validation",
+            "without silent fallback",
+            "Pi SDK 0.99.2",
+            "fresh and ephemeral, with no resume",
+            "canonical auth path without inherited plugins",
+            "no shell or tests",
+            "not an operating-system sandbox",
+            "supported quota evidence adapter is unavailable",
+            "arrays and floors",
+            "Operator plan approval authorizes its declared write nodes",
+            "unrelated writes and policy-required approvals need an explicit worker approval",
+            "Explicit operator acceptance unlocks dependent work",
+            "nothing automatically merges into the source branch or pushes",
+            "background tasks, not tabs or windows",
+        ):
+            with self.subTest(statement=statement):
+                self.assertIn(statement, self.page)
+        for retired in (
+            "workers disabled",
+            "Worker execution is disabled",
+            "Worker execution is not implemented",
+            "Workers and routing remain disabled",
+            "Implementation workers come later",
+            "Codex adapter",
+        ):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, self.page)
 
     def test_original_design_is_retained_without_private_runtime(self):
         for identifier in ("diagram-title", "interaction", "specialists", "execution-gate"):

@@ -9,7 +9,11 @@ In plain English: each task names the tasks that must finish before it can start
 `orchestrator.graphs` validates plans and computes which nodes may run from a state snapshot.
 Templates use exactly the same schema and scheduler as resulting plans, including independent branches and joins.
 The planner should receive the selected template as guidance when constructing a task-specific plan, and its output must pass `validate_plan` before being used.
-Worker launching and model routing remain disabled; these APIs do not start processes, persist state, verify acceptance evidence, or authenticate human approvals.
+These pure graph APIs do not start processes, persist state, verify acceptance evidence, or authenticate human approvals.
+The durable worker service separately enforces these gates and dispatches selected workers.
+Nodes may declare mode `read` (default) or `write`; only work nodes may request write mode.
+A successful worker remains `awaiting_review` until operator acceptance, so its dependents cannot start early.
+Plain version: finishing a worker is not enough; its result must be accepted before the next task starts.
 The current planner/critic role interaction is not an arbitrary graph executor.
 In plain English: the program can check the task order and tell you what is allowed next, but it does not run these tasks for you yet.
 

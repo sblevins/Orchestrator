@@ -33,17 +33,38 @@ class ConfigurationTests(unittest.TestCase):
         expected = {
             "orchestrator": ("claude", "claude-sonnet-5-5", "low"),
             "planner": ("claude", "claude-opus-5-5", "high"),
-            "critic": ("codex", "gpt-6-astra", "high"),
+            "critic": ("pi", "gpt-6-astra", "high"),
             "monitor": ("claude", "claude-opus-5-5", "high"),
         }
         for name, values in expected.items():
             role = role_config(self.defaults, name)
             self.assertEqual(tuple(role[key] for key in ("adapter", "model", "effort")), values)
         self.assertEqual(self.defaults["frontends"]["preferred"], "claude")
-        self.assertEqual(self.defaults["workers"], {"enabled": False})
-        self.assertEqual(
-            self.defaults["routing"], {"enabled": False, "rules": [], "first_mate": {}}
-        )
+        self.assertEqual(self.defaults["workers"], {"enabled": True})
+        self.assertEqual(self.defaults["routing"], {"enabled": True, "rules": [], "first_mate": {}})
+
+    def test_provider_harness_and_effort_are_not_silently_changed(self):
+        critic = self.defaults["roles"]["critic"]
+        self.assertEqual(critic["provider"], "openai-codex")
+        for changes in (
+            {"provider": "anthropic"},
+            {"model": "claude-opus-5-5"},
+            {"provider": ""},
+            {"effort": "max"},
+            {"adapter": "codex"},
+        ):
+            config = deepcopy(self.defaults)
+            config["roles"]["critic"].update(changes)
+            with self.subTest(changes=changes), self.assertRaises(ConfigurationError):
+                validate_config(config)
+        config = deepcopy(self.defaults)
+        config["roles"]["critic"].update(provider="new-vendor", model="future-model", effort="off")
+        validate_config(config)
+        for changes in ({"provider": "openai"}, {"model": "gpt-6-astra"}):
+            config = deepcopy(self.defaults)
+            config["roles"]["planner"].update(changes)
+            with self.assertRaises(ConfigurationError):
+                validate_config(config)
 
     def test_no_role_has_a_dollar_budget(self):
         for name in self.defaults["roles"]:
@@ -208,18 +229,18 @@ class ConfigurationTests(unittest.TestCase):
     def test_layer_order_and_project_isolation(self):
         self.write(
             "config/local.toml",
-            '[roles.planner]\nmodel="future-model"\nallowed_tools=["Read"]\n[supervisor]\ntask_timeout_seconds=400\n',
+            '[roles.planner]\nmodel="claude-future-model"\nallowed_tools=["Read"]\n[supervisor]\ntask_timeout_seconds=400\n',
         )
         self.write(
             "config/projects/alpha.toml",
-            '[roles.planner]\nmodel="project-model"\nallowed_tools=[]\n',
+            '[roles.planner]\nmodel="claude-project-model"\nallowed_tools=[]\n',
         )
         alpha = load_config(self.home, "alpha")["roles"]["planner"]
         beta = load_config(self.home, "beta")["roles"]["planner"]
-        self.assertEqual(alpha["model"], "project-model")
+        self.assertEqual(alpha["model"], "claude-project-model")
         self.assertEqual(alpha["allowed_tools"], [])
         self.assertEqual(load_config(self.home, "alpha")["supervisor"]["task_timeout_seconds"], 400)
-        self.assertEqual(beta["model"], "future-model")
+        self.assertEqual(beta["model"], "claude-future-model")
         self.assertEqual(beta["allowed_tools"], ["Read"])
         self.assertEqual(beta["effort"], "high")
 
@@ -333,12 +354,10 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             validate_config(config)
 
-    def test_no_workers_or_routing(self):
+    def test_routing_requires_project_policy_not_inline_models(self):
         for section, key, value in (
-            ("workers", "enabled", True),
             ("workers", "enabled", 0),
             ("workers", "model", "anything"),
-            ("routing", "enabled", True),
             ("routing", "rules", [{}]),
             ("routing", "first_mate", {"model": "x"}),
             ("routing", "default_model", "anything"),

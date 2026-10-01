@@ -56,9 +56,14 @@ class FrontendTests(unittest.TestCase):
     def test_pi_provider_and_separate_storage(self):
         for adapter, provider, effort in [
             ("claude", "anthropic", "high"),
-            ("codex", "openai-codex", "xhigh"),
+            ("pi", "openai-codex", "xhigh"),
         ]:
-            self.config["roles"]["orchestrator"].update(adapter=adapter, effort=effort)
+            self.config["roles"]["orchestrator"].update(
+                adapter=adapter,
+                effort=effort,
+                provider=provider,
+                model="claude-sonnet-5-5" if adapter == "claude" else "gpt-6-astra",
+            )
             command = build_frontend_command(self.home, self.config, "pi", self.session)
             self.assertEqual(command[command.index("--provider") + 1], provider)
             self.assertEqual(command[command.index("--thinking") + 1], effort)

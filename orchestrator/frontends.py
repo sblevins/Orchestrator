@@ -24,7 +24,7 @@ def build_frontend_command(
     except (ValueError, AttributeError) as error:
         raise ConfigurationError("Frontend session ID must be a canonical UUID") from error
     role = config["roles"]["orchestrator"]
-    provider = {"claude": "anthropic", "codex": "openai-codex"}.get(role["adapter"])
+    provider = "anthropic" if role["adapter"] == "claude" else role.get("provider")
     if provider is None or (frontend == "claude" and role["adapter"] != "claude"):
         raise ConfigurationError(
             "Requested orchestrator provider is incompatible with this frontend"

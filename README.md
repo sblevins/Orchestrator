@@ -14,7 +14,7 @@ Plain version: closing a chat does not erase who is working or what still needs 
 
 ## Start
 
-Requirements: Linux, Python 3.11+, `machine-resources`, authenticated Claude Code and Codex for the default specialist roles, and Pi if using that frontend.
+Requirements: Linux, Python 3.11+, `machine-resources`, authenticated Claude Code and Pi for the default specialist roles.
 No Python runtime dependencies need installing.
 
 ```bash
@@ -61,10 +61,12 @@ The agreed defaults are included in [`config/default.toml`](config/default.toml)
 | --- | --- | --- | --- |
 | Fast orchestrator | Claude | `claude-sonnet-5-5` | `low` |
 | Planner | Claude | `claude-opus-5-5` | `high` |
-| Independent critic | Codex | `gpt-6-astra` | `high` |
+| Independent critic | Pi (`openai-codex`) | `gpt-6-astra` | `high` |
 | Slow monitor | Claude | `claude-opus-5-5` | `high` |
 
-Worker routing remains disabled with no default worker model or effort.
+Workers use a project-local FirstMate-compatible routing policy, with no default worker model or effort.
+Claude Code runs Anthropic specialists; Pi runs specialists from every other provider.
+Missing model access, unsupported effort, or a missing policy stops dispatch rather than silently switching models.
 Fable and the other models discussed in the research remain alternatives, not silently enabled defaults.
 Native Claude foreground selection still follows its own settings and CLI precedence; background roles and native Pi use the configured roles.
 
@@ -102,11 +104,31 @@ Ambiguous or consequential messages do, and the orchestrator cannot veto that re
 - Persistent feedback with explicit acknowledgment, monitor failure backoff, and blocking findings.
 - Private run artifacts, read-only specialists, resource reservations, and rotating SQLite backups.
 - Native Claude hooks/MCP and an owned Pi bridge over the same supervisor.
+- Project-configured worker routing, isolated write workspaces, and explicit result acceptance.
+- Background workers shown as tracked sub-agents in the coordinator, without Herder tabs or extra windows.
+
+## Worker setup
+
+Create an empty project policy, then add your preferred profiles and routing guidelines:
+
+```bash
+./bin/orchestrator routing init --project my-project
+# Edit ~/Code/my-project/.orchestrator/crew-dispatch.json
+./bin/orchestrator routing validate --project my-project
+```
+
+The slow monitor chooses plan-associated workers; the orchestrator chooses unrelated on-demand workers.
+Both follow the same project policy, with explicit provider/model/effort selections saved before launch.
+No separate routing model runs.
+An empty policy is intentionally not enough to execute a worker.
+Write workers require operator approval and work in isolated Git worktrees, never your source checkout.
+Successful results need operator acceptance before graph dependents start.
+Workers use file tools only: they cannot run shell commands or tests, and must disclose checks they could not perform.
+See [worker routing](docs/workers.md) for policy format, permissions, and operator commands.
+Plain version: choose your worker preferences once, then review permissions and results here without opening more terminals.
 
 ## Deliberately not enabled
 
-**Worker routing and worker execution are disabled**, including after plan approval.
-The later router must use First Mate's guidelines: the monitor chooses plan workers; the orchestrator chooses unrelated on-demand workers.
 Third-party Pi orchestration plugins remain undecided and are not installed by this project.
 There is no distributed scheduler, automatic publishing, automatic permission approval, or guarantee of exactly-once execution.
 
@@ -114,7 +136,7 @@ This is a single-machine implementation, not a Temporal deployment.
 The supervisor survives frontend exits, but an OS restart or supervisor crash requires starting it again; binding or resuming a project in either frontend does this.
 Native voice, live model access, and Claude's idle wake behavior require interactive acceptance testing.
 No per-role dollar cap is imposed on either specialist adapter; deadlines and machine-resource limits still apply.
-Plain version: the durable planning foundation is ready to try, but it cannot yet send workers to change your project.
+Plain version: workers can inspect or edit within their granted scope, but cannot publish changes or approve themselves.
 
 ## Checks and documentation
 

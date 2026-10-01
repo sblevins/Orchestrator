@@ -14,5 +14,8 @@ orchestrator = "orchestrator.cli:main"
 [tool.setuptools]
 packages = ["orchestrator"]
 
+[tool.setuptools.package-data]
+orchestrator = ["pi_bridge.mjs"]
+
 [tool.ruff]
 line-length = 100

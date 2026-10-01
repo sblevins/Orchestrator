@@ -112,7 +112,6 @@ CREATE TABLE IF NOT EXISTS service(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS graph_nodes(
  plan_id TEXT NOT NULL REFERENCES plans(id), node_id TEXT NOT NULL, specification TEXT NOT NULL,
  state TEXT NOT NULL DEFAULT 'pending', evidence TEXT, PRIMARY KEY(plan_id,node_id));
-PRAGMA user_version=1;
 """
 
 
@@ -129,19 +128,26 @@ class Store:
             raise StateError("The state database must not be a symlink")
         with contextlib.closing(self.connect()) as database:
             version = database.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise StateError(f"Unsupported database schema {version}; refusing to downgrade")
             database.execute("PRAGMA journal_mode=WAL")
             database.executescript(SCHEMA)
+            from .workers import migrate
+
+            migrate(database)
         os.chmod(self.database, 0o600)
 
     def connect(self) -> sqlite3.Connection:
         database = sqlite3.connect(self.database, timeout=30, isolation_level=None)
-        database.row_factory = sqlite3.Row
-        database.execute("PRAGMA foreign_keys=ON")
-        database.execute("PRAGMA busy_timeout=30000")
-        database.execute("PRAGMA synchronous=FULL")
-        return database
+        try:
+            database.row_factory = sqlite3.Row
+            database.execute("PRAGMA foreign_keys=ON")
+            database.execute("PRAGMA busy_timeout=30000")
+            database.execute("PRAGMA synchronous=FULL")
+            return database
+        except BaseException:
+            database.close()
+            raise
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -407,11 +413,16 @@ class Store:
         depends_on=(),
         cursor=None,
         idempotency_key=None,
+        worker_request_id=None,
     ) -> str:
-        if role not in CORE_ROLES:
-            raise StateError(
-                "Worker dispatch is deferred; only planner, critic, and monitor may run"
+        if role == "worker":
+            from .workers import WorkerService
+
+            WorkerService(self).enqueue_check(
+                database, project_id, session_id, prompt, config, plan_id, worker_request_id
             )
+        elif role not in CORE_ROLES or worker_request_id is not None:
+            raise StateError("Unsupported task role or worker request link")
         session = database.execute(
             "SELECT project_id FROM sessions WHERE id=?", (session_id,)
         ).fetchone()
@@ -436,7 +447,7 @@ class Store:
         timestamp = now()
         database.execute(
             "INSERT INTO tasks(id,project_id,session_id,role,plan_id,state,prompt,config_json,created,"
-            "updated,cursor,idempotency_key) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?)",
+            "updated,cursor,idempotency_key,worker_request_id) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?)",
             (
                 task_id,
                 project_id,
@@ -449,6 +460,7 @@ class Store:
                 timestamp,
                 cursor,
                 idempotency_key,
+                worker_request_id,
             ),
         )
         for prerequisite in depends_on:
@@ -464,13 +476,17 @@ class Store:
         return task_id
 
     def enqueue(self, project_id, session_id, role, prompt, config, **kwargs) -> dict:
+        if role == "worker" or kwargs.get("worker_request_id") is not None:
+            raise StateError("Workers can only be enqueued by durable dispatch_ready")
         with self.transaction() as database:
             task_id = self._enqueue(
                 database, project_id, session_id, role, prompt, config, **kwargs
             )
         return self.task(task_id)
 
-    def create_plan(self, session_id: str, request: str, config: dict) -> dict:
+    def create_plan(
+        self, session_id: str, request: str, config: dict, *, origin_event_id=None
+    ) -> dict:
         if not isinstance(request, str) or not request.strip() or len(request) > 100000:
             raise StateError("Plan request must contain 1..100000 characters")
         with self.transaction() as database:
@@ -485,6 +501,29 @@ class Store:
             ):
                 raise StateError("Planning requires the active project coordinator")
             project_id = session["project_id"]
+            if origin_event_id is None:
+                origin = database.execute(
+                    "SELECT id FROM events WHERE project_id=? AND session_id=? AND kind='user.message' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (project_id, session_id),
+                ).fetchone()
+                origin_event_id = (
+                    origin[0]
+                    if origin
+                    else self._event(
+                        database, project_id, "user.message", {"text": request}, session_id
+                    )
+                )
+            from .workers import WorkerService
+
+            WorkerService(self)._origin(database, project_id, origin_event_id, "planning")
+            if database.execute(
+                "SELECT 1 FROM worker_requests WHERE origin_event_id=? AND plan_id IS NULL",
+                (origin_event_id,),
+            ).fetchone():
+                raise StateError(
+                    "This event already owns unrelated work; record a new planning event"
+                )
             version = database.execute(
                 "SELECT COALESCE(MAX(version),0)+1 FROM plans WHERE project_id=?", (project_id,)
             ).fetchone()[0]
@@ -494,9 +533,9 @@ class Store:
                 (project_id,),
             )
             database.execute(
-                "INSERT INTO plans(id,project_id,session_id,version,request,status,created) "
-                "VALUES(?,?,?,?,?,'drafting',?)",
-                (plan_id, project_id, session_id, version, request, now()),
+                "INSERT INTO plans(id,project_id,session_id,version,request,status,created,origin_event_id) "
+                "VALUES(?,?,?,?,?,'drafting',?,?)",
+                (plan_id, project_id, session_id, version, request, now(), origin_event_id),
             )
             task_id = self._enqueue(
                 database,
@@ -559,7 +598,7 @@ class Store:
             if active >= max_parallel:
                 return None
             row = database.execute(
-                "SELECT t.id FROM tasks t WHERE t.state='queued' "
+                "SELECT t.* FROM tasks t WHERE t.state='queued' "
                 "AND (t.role='monitor' OR NOT EXISTS(SELECT 1 FROM service s WHERE s.key='pause:'||t.project_id)) "
                 "AND NOT EXISTS(SELECT 1 "
                 "FROM dependencies d JOIN tasks p ON p.id=d.prerequisite "
@@ -568,14 +607,40 @@ class Store:
             ).fetchone()
             if not row:
                 return None
+            if row["role"] == "worker":
+                from .workers import WorkerService
+
+                try:
+                    WorkerService(self).task_check(database, row)
+                except ValueError as error:
+                    database.execute(
+                        "UPDATE tasks SET state='cancelled',error=?,updated=? WHERE id=?",
+                        (str(error), now(), row["id"]),
+                    )
+                    return None
             database.execute(
                 "UPDATE tasks SET state='starting',token=?,updated=? WHERE id=?",
                 (str(uuid.uuid4()), now(), row[0]),
             )
         return self.task(row[0])
 
+    def _worker_live_check(self, database, task_id, token):
+        task = database.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if task and task["role"] == "worker":
+            from .workers import WorkerService
+
+            if task["token"] != token:
+                return False
+            try:
+                WorkerService(self).task_check(database, task, active=True)
+            except ValueError:
+                return False
+        return True
+
     def runner_started(self, task_id: str, token: str, pid: int, identity: str) -> bool:
         with self.transaction() as database:
+            if not self._worker_live_check(database, task_id, token):
+                return False
             return (
                 database.execute(
                     "UPDATE tasks SET state='running',runner_pid=?,runner_identity=?,heartbeat=?,updated=? "
@@ -587,6 +652,8 @@ class Store:
 
     def heartbeat(self, task_id: str, token: str) -> bool:
         with self.transaction() as database:
+            if not self._worker_live_check(database, task_id, token):
+                return False
             return (
                 database.execute(
                     "UPDATE tasks SET heartbeat=?,updated=? WHERE id=? AND token=? AND state='running' "
@@ -772,7 +839,9 @@ class Store:
                 notify=True,
             )
 
-    def apply_monitor(self, task: dict, reviewed_through: int, findings: list) -> None:
+    def apply_monitor(
+        self, task: dict, reviewed_through: int, findings: list, worker_selections=None
+    ) -> None:
         if (
             type(reviewed_through) is not int
             or reviewed_through != task["cursor"]
@@ -789,11 +858,28 @@ class Store:
             if not isinstance(finding.get("summary"), str) or not finding["summary"].strip():
                 raise StateError("Monitor findings require a nonempty summary")
         with self.transaction() as database:
-            current = database.execute(
-                "SELECT processed FROM tasks WHERE id=?", (task["id"],)
-            ).fetchone()
-            if current[0]:
+            current = database.execute("SELECT * FROM tasks WHERE id=?", (task["id"],)).fetchone()
+            if not current or current["role"] != "monitor" or current["state"] != "succeeded":
+                raise StateError("Only a persisted successful monitor can be accepted")
+            if current["processed"]:
                 return
+            if current["cursor"] != reviewed_through:
+                raise StateError("Monitor cursor differs from persisted task")
+            task = dict(current)
+            if worker_selections is not None:
+                from .workers import WorkerService
+
+                try:
+                    saved_report = json.loads(current["result"])
+                except (TypeError, ValueError) as error:
+                    raise StateError("Monitor result is not valid JSON") from error
+                if (
+                    not isinstance(saved_report, dict)
+                    or saved_report.get("findings") != findings
+                    or saved_report.get("reviewed_through") != reviewed_through
+                ):
+                    raise StateError("Monitor acceptance must match its persisted result")
+                WorkerService(self).apply_monitor_selections(database, task, worker_selections)
             for finding in findings:
                 if finding["severity"] == "blocking":
                     database.execute(
@@ -988,7 +1074,7 @@ class Store:
             ],
             "tasks": tasks[-100:],
             "holds": holds,
-            "workers_enabled": False,
+            "workers_enabled": True,
         }
 
     def read_note(self, project_id: str, name: str) -> dict:
@@ -1100,8 +1186,8 @@ class Store:
             "graph": graph,
             "states": states,
             "readiness": readiness,
-            "dispatch_enabled": False,
-            "dispatch_blocker": "Worker router is intentionally not configured",
+            "dispatch_enabled": True,
+            "dispatch_blocker": None,
         }
 
     def service_value(self, key: str, default: str | None = None) -> str | None:
@@ -1168,8 +1254,8 @@ class Store:
         revision_id = str(uuid.uuid4())
         database.execute("UPDATE plans SET status='superseded' WHERE id=?", (plan_id,))
         database.execute(
-            "INSERT INTO plans(id,project_id,session_id,version,request,status,review_round,created) "
-            "VALUES(?,?,?,?,?,'drafting',?,?)",
+            "INSERT INTO plans(id,project_id,session_id,version,request,status,review_round,created,origin_event_id) "
+            "VALUES(?,?,?,?,?,'drafting',?,?,?)",
             (
                 revision_id,
                 plan["project_id"],
@@ -1178,6 +1264,7 @@ class Store:
                 plan["request"],
                 plan["review_round"] + 1,
                 now(),
+                plan["origin_event_id"],
             ),
         )
         task_id = self._enqueue(
