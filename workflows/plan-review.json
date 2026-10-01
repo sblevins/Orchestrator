@@ -1,0 +1,40 @@
+{
+  "summary": "Research the request, implement an accepted solution, independently review it, and obtain human approval.",
+  "assumptions": [],
+  "risks": [],
+  "questions": [],
+  "nodes": [
+    {
+      "id": "research",
+      "title": "Research requirements and existing behavior",
+      "description": "Inspect relevant evidence, identify constraints, and resolve or record open questions before implementation.",
+      "depends_on": [],
+      "acceptance_criteria": ["Requirements and supporting evidence are recorded.", "Unresolved questions and risks are explicit."],
+      "kind": "work"
+    },
+    {
+      "id": "implementation",
+      "title": "Implement and verify the solution",
+      "description": "Make changes supported by research and verify the user's acceptance conditions.",
+      "depends_on": ["research"],
+      "acceptance_criteria": ["The requested behavior is implemented.", "Relevant tests pass and verification evidence is recorded."],
+      "kind": "work"
+    },
+    {
+      "id": "review",
+      "title": "Independently review implementation and evidence",
+      "description": "Check correctness, safety, requirements coverage, and test evidence independently of implementation.",
+      "depends_on": ["implementation"],
+      "acceptance_criteria": ["Review findings are recorded and blocking findings are resolved."],
+      "kind": "review"
+    },
+    {
+      "id": "approval",
+      "title": "Obtain explicit human approval",
+      "description": "Present results and review evidence to the human; never infer approval from completed work.",
+      "depends_on": ["review"],
+      "acceptance_criteria": ["An authorized human explicitly approves the reviewed result."],
+      "kind": "approval"
+    }
+  ]
+}

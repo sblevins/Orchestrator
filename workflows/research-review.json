@@ -1,0 +1,40 @@
+{
+  "summary": "Research a question, independently check evidence and risks in parallel, then obtain human approval.",
+  "assumptions": [],
+  "risks": [],
+  "questions": [],
+  "nodes": [
+    {
+      "id": "research",
+      "title": "Research the question",
+      "description": "Gather evidence, document sources, and distinguish established facts from assumptions.",
+      "depends_on": [],
+      "acceptance_criteria": ["The question is answered with traceable evidence.", "Assumptions and unanswered questions are documented."],
+      "kind": "work"
+    },
+    {
+      "id": "evidence-review",
+      "title": "Review evidence independently",
+      "description": "Verify the research sources and whether the conclusions follow from the evidence.",
+      "depends_on": ["research"],
+      "acceptance_criteria": ["Evidence has been independently checked and blocking findings resolved."],
+      "kind": "review"
+    },
+    {
+      "id": "risk-review",
+      "title": "Review risks independently",
+      "description": "Identify missing constraints, safety concerns, and uncertainty in the proposed conclusions.",
+      "depends_on": ["research"],
+      "acceptance_criteria": ["Material risks are recorded and blocking findings resolved."],
+      "kind": "review"
+    },
+    {
+      "id": "approval",
+      "title": "Obtain explicit human approval",
+      "description": "Ask a human to approve the research after both independent reviews finish.",
+      "depends_on": ["evidence-review", "risk-review"],
+      "acceptance_criteria": ["An authorized human explicitly approves the reviewed conclusions."],
+      "kind": "approval"
+    }
+  ]
+}
