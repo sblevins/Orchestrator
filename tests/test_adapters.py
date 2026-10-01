@@ -60,7 +60,6 @@ class CommandTests(unittest.TestCase):
             "--allowedTools": "Read,Glob,Grep",
             "--settings": "{}",
             "--setting-sources": "",
-            "--max-budget-usd": "15.0",
         }.items():
             self.assertEqual(command[command.index(flag) + 1], value)
         self.assertIn("-p", command)
@@ -68,6 +67,30 @@ class CommandTests(unittest.TestCase):
         self.assertIn("--disable-slash-commands", command)
         self.assertEqual(command[-2:], ["--", "review"])
         self.assertNotIn("--resume", command)
+
+    def test_all_role_commands_have_no_spending_cap(self):
+        for role in self.config["roles"]:
+            for session in (None, "saved-session"):
+                for stdin_prompt in (False, True):
+                    with self.subTest(role=role, session=session, stdin=stdin_prompt):
+                        command = build_command(
+                            self.config,
+                            role,
+                            "review",
+                            self.home,
+                            self.output,
+                            session,
+                            stdin_prompt=stdin_prompt,
+                        )
+                        self.assertFalse(any("budget" in argument for argument in command))
+
+    def test_obsolete_budget_cannot_be_silently_ignored(self):
+        for role in self.config["roles"]:
+            with self.subTest(role=role):
+                config = deepcopy(self.config)
+                config["roles"][role]["max_budget_usd"] = 5.0
+                with self.assertRaisesRegex(AdapterError, "removed.*Remove"):
+                    build_command(config, role, "review", self.home, self.output)
 
     def test_empty_and_restricted_claude_tools(self):
         for tools in ([], ["Read"]):

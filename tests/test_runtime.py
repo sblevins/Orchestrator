@@ -79,7 +79,7 @@ os.execv(arguments[0], arguments)
             database.execute("UPDATE projects SET next_monitor_at=?", (time.time() + 3600,))
         self.config = load_config(self.home)
         self.config["adapters"]["claude"]["command"] = [str(self.harness)]
-        self.config["roles"]["planner"]["timeout_seconds"] = 2
+        self.config["supervisor"]["task_timeout_seconds"] = 1
         self.config["supervisor"]["heartbeat_seconds"] = 0.1
         self.config["supervisor"]["stale_seconds"] = 0.3
         self.environment = {
@@ -190,6 +190,34 @@ else:
                 self.assertLessEqual(log.stat().st_size, 8 * 1024 * 1024)
                 harness = json.loads(self.store.service_value("harness:" + task["id"]))
                 self.assertIsNone(process_identity(harness["pid"]))
+
+    def test_saved_task_limits_control_reservation_and_deadline(self):
+        self.config["supervisor"].update(task_memory="3G", task_cpus=2)
+        task = self.enqueue("SLOW")
+        # Later local edits must not change an already queued task's limits.
+        (self.home / "config").mkdir(exist_ok=True)
+        (self.home / "config/local.toml").write_text(
+            '[supervisor]\ntask_timeout_seconds=30\ntask_memory="4G"\ntask_cpus=3\n'
+        )
+        reservation_log = self.root / "reservation.json"
+        self.registry.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            "if sys.argv[1] == 'status': sys.exit(0)\n"
+            f"pathlib.Path({str(reservation_log)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+            "arguments = sys.argv[sys.argv.index('--') + 1:]\n"
+            "os.execv(arguments[0], arguments)\n"
+        )
+        supervisor = self.spawn("supervise", "--once")
+        stdout, stderr = supervisor.communicate(timeout=5)
+        self.assertEqual(supervisor.returncode, 0, (stdout, stderr))
+        finished = self.wait_state(task["id"], {"failed"})
+        self.assertEqual(finished["error"], "Harness deadline exceeded")
+        arguments = json.loads(reservation_log.read_text())
+        self.assertEqual(arguments[arguments.index("-m") + 1], "3G")
+        self.assertEqual(arguments[arguments.index("-c") + 1], "2")
+        self.assertEqual(arguments[arguments.index("-e") + 1], "61s")
+        self.assertIn("--hard-limit", arguments)
 
     def test_cancel(self):
         task, child = self.runner("SLOW")

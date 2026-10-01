@@ -28,7 +28,9 @@ Plain version: use a simple project name, keep your private files private, and d
 
 ## Supervisor and personalization
 
-`supervisor` requires `poll_seconds`, `heartbeat_seconds`, `stale_seconds`, `max_parallel`, `monitor_interval_seconds`, and `monitor_batch_events`.
+`supervisor` controls polling, heartbeat/stale thresholds, parallelism, monitor cadence/batching, and shared execution safeguards.
+The shared execution fields are `task_timeout_seconds`, `task_memory`, `task_cpus`, `frontend_memory`, and `frontend_cpus`.
+Defaults reserve 2G and one CPU per task/frontend, with a 900-second task deadline; there are no per-role resource settings.
 Timing values are finite numbers from 0.1 through 86400 seconds; stale time must exceed heartbeat time.
 Parallelism is an integer from 1 through 64, and monitor batches contain 1 through 10000 events.
 Boolean values are not numbers.
@@ -74,10 +76,11 @@ If required work fails, tasks that need it stay blocked or are cancelled accordi
 ## Roles and adapters
 
 Exactly four core roles are configured: `orchestrator`, `planner`, `critic`, and `monitor`.
-Each requires `adapter`, `model`, `effort`, `timeout_seconds`, `max_budget_usd`, `memory`, `cpus`, and `allowed_tools`.
+Each requires `adapter`, `model`, `effort`, and `allowed_tools`.
+Timeout, CPU, memory, and dollar-budget parameters are not role settings.
 An optional `prompt_path` must be exactly `roles/<role>.md` for that role.
 Edit the tracked role Markdown files to change role instructions.
-Every role's model and resource settings can be overridden privately.
+Every role's model and effort can be overridden privately.
 
 The orchestrator defaults to `claude-sonnet-5-5` with low effort; planner and monitor default to `claude-opus-5-5` with high effort.
 The critic defaults to `gpt-6-astra` through Codex with high effort.
@@ -87,14 +90,18 @@ Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Codex efforts ar
 No model-specific effort assumptions or silent fallbacks are applied.
 Plain version: you can change any model name, but the chosen command must support the effort setting and the provider must actually offer that model.
 
-Timeouts range from 1 through 86400 seconds, budgets from 0.01 through 1000 USD, and integer CPU reservations from 1 through 64.
+The shared supervisor task timeout ranges from 1 through 86400 seconds, and shared task/frontend CPU reservations range from 1 through 64.
+Per-role dollar budgets have been removed; neither adapter receives a spending-cap flag.
+Remove `max_budget_usd`, `timeout_seconds`, `memory`, and `cpus` from older role overrides before validating them.
+If customization of execution limits is needed, change the shared supervisor fields instead.
+Memory/CPU reservations and task deadlines remain independent protections against resource exhaustion and stuck processes.
 Memory uses positive integer `M` or `G` strings, bounded from `64M` through `1024G`, with `1G` equal to `1024M`.
 Resource settings express requested reservations; the runtime must still obtain machine resources before launching work.
 Allowed tools are a unique list containing only `Read`, `Glob`, and `Grep`.
 Claude supports narrower lists, including an empty list.
 Codex specialists require the full list because the CLI provides a read-only sandbox rather than individual Read/Glob/Grep switches; unsupported narrower permissions are rejected.
 Adapters must translate these logical read-only permissions into their own enforcement and reject unsupported restrictions rather than widening access.
-Plain version: configuration says what a specialist may read and how much it may use; the launcher must enforce those limits.
+Plain version: choose the model and how carefully it should think; the background program handles machine limits and checks what it may read.
 
 `adapters.claude.command` defaults to `["claude"]`, and `adapters.codex.command` defaults to `["codex"]`.
 Commands are argv lists containing exactly one nonempty executable name or path.

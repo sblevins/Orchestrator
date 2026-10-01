@@ -13,7 +13,7 @@ Missing registry executables and rejected reservations produce actionable errors
 
 For diagnostics, `python3 -m orchestrator.runtime supervise --home /absolute/home --once` performs one scheduler pass.
 A manually started long-running supervisor must itself be launched through `machine-resources run -m 256M -c 1 -e 86400s -d 'orchestrator supervisor' --hard-limit -- python3 -m orchestrator.runtime supervise --home /absolute/home`.
-The internal runner entry point is `python3 -m orchestrator.runtime run-task --home /absolute/home --task-id ID --token TOKEN`; production dispatch wraps it in a role-sized resource reservation with an estimate of its timeout plus 60 seconds.
+The internal runner entry point is `python3 -m orchestrator.runtime run-task --home /absolute/home --task-id ID --token TOKEN`; production dispatch wraps it in the shared supervisor task resource reservation, with an estimate of the shared task timeout plus 60 seconds.
 Do not launch that entry point directly for production work.
 
 ## Ownership and recovery
@@ -75,4 +75,5 @@ Tests use real subprocesses and fake local harness/registry executables, never p
 
 The stored Claude cost is the harness-reported value, not a verified per-turn delta across resumes.
 Do not sum resumed reports as if that accounting has been validated.
-Codex cost is unknown, and its configured budget is not a CLI-enforced dollar cap.
+Codex cost is unknown.
+Neither adapter has a configured per-role dollar cap; timeouts and machine-resource limits remain enforced.

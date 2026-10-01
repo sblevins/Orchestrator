@@ -69,8 +69,6 @@ def build_command(
             "",
             "--strict-mcp-config",
             "--disable-slash-commands",
-            "--max-budget-usd",
-            str(settings["max_budget_usd"]),
         ]
         if project_root is not None:
             command += ["--add-dir", _argument(str(project_root), "project_root")]

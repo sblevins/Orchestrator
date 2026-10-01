@@ -3,6 +3,7 @@
 This is the source research, not a benchmark of this implementation.
 The selected initial defaults are Sonnet 5.5 low for the orchestrator, Opus 5.5 high for planner and monitor, and GPT-6 Astra high for the critic.
 Fable remains a deeper-audit candidate, not the default monitor.
+The later implementation deliberately removes per-role dollar budgets; spending-limit recommendations in this archived research are not current configuration.
 See `../../config/default.toml` for executable role settings.
 
 # Publicly verified model choices for multiagent orchestration

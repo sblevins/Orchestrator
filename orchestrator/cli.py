@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import json
 import os
@@ -182,7 +183,7 @@ def _version(executable: str) -> dict:
 def doctor(home: Path) -> dict:
     config = load_config(home)
     store = Store(home)
-    with store.connect() as database:
+    with contextlib.closing(store.connect()) as database:
         integrity = database.execute("PRAGMA integrity_check").fetchone()[0]
     binaries = {
         name: _version(settings["command"][0]) for name, settings in config["adapters"].items()
@@ -217,7 +218,7 @@ def doctor(home: Path) -> dict:
         "third_party_orchestration_plugins": "not selected or installed",
         "model_access": "not probed; executable presence does not establish access to a model",
         "claude_delivery": "bounded asyncRewake hooks; preview channels require explicit --channels",
-        "codex_budget": "deadline enforced; CLI does not provide a hard dollar cap",
+        "spending_limits": "no per-role dollar caps configured",
         "voice": "native Claude UI preserved; microphone and account eligibility require interactive verification",
     }
 
@@ -276,14 +277,14 @@ def start(home: Path, arguments) -> int:
             }
         )
         environment.pop("ORCHESTRATOR_CHILD", None)
-        role = config["roles"]["orchestrator"]
+        supervisor = config["supervisor"]
         managed = [
             resource_manager,
             "run",
             "-m",
-            role["memory"],
+            supervisor["frontend_memory"],
             "-c",
-            str(role["cpus"]),
+            str(supervisor["frontend_cpus"]),
             "-d",
             f"Orchestrator {frontend} {arguments.project or 'unbound'}",
             "-e",

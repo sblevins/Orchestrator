@@ -74,7 +74,7 @@ See `../firstmate-coverage.md` for the shipped subset and explicit deferrals.
 | Instruction and runtime version awareness | Session-start AGENTS hash/re-emission; hook/extension versions; tool probes; guarded update/restart | **Adopt and expand.** Record repository commit, policy digest, schema version, Claude version, role generation and loaded version per persistent process. Do not equate a pulled checkout with a reloaded process. |
 | Model cost telemetry | Engine JSON result parses usage and cost; resumed total converted to per-turn delta; host log | **Adopt.** Distinguish reported cost estimate from billed cost; track cache, input/output, elapsed time and missing telemetry. |
 | Quota alerts | `fm-procevent-quota.sh`, `fm-quota-axi-lib.sh` | **Adopt optional observability.** Unknown quota must stay unknown; do not silently change model/account. |
-| Spend budget | AFK `spend_max_concurrent_workers`; engine turn bounds/rotation | **Adopt concurrency cap, add real budget design.** This AFK field is a worker-count cap, not a dollar/token ceiling. No fleet-wide hard monetary budget was established by this review. |
+| Spend budget | AFK `spend_max_concurrent_workers`; engine turn bounds/rotation | **Adopt concurrency cap; no per-role monetary budget.** This AFK field is a worker-count cap, not a dollar/token ceiling. No fleet-wide hard monetary budget was established by this review. |
 | Quota-aware worker router | `fm-quota-choose.sh`, `quota-array-dispatch`, crew-dispatch profiles | **Defer explicitly.** Do not smuggle router work into monitor model selection. |
 | External typed dispatch resolver | `fm-dispatch-resolve.sh`, typesafe.ai/Jev, optional never-send list | **Defer; reject initial dependency.** It sends brief text externally and is unrelated to initial two-role reliability. |
 | Notes and durable commitments | Task bodies, captain preferences, learnings, inbox replies, public-followup obligations | **Adopt.** Task notes belong to tasks; personal preferences remain private; promised actions need explicit open/closed records. |
@@ -207,7 +207,7 @@ If the notification fails, the message is still there.
 - Versioning: `fm-session-start.sh` hashes startup AGENTS and can re-emit changed instructions, while updates use guarded restart/nudge paths; this is not a demonstrated complete per-worker loaded-code/policy/schema manifest.
 - Memory: stow is a session-knowledge sweep with archival, not an autonomous long-term reconciliation daemon, and its rules explicitly admit that gap.
 
-Plain English: Firstmate has useful readings and warnings, but Orchestrator still needs its own spending limit, machine reservation, correct account selection, and record of what each live role actually loaded.
+Plain English: Firstmate has useful readings and warnings, but Orchestrator still needs its own machine reservation, correct account selection, and record of what each live role actually loaded.
 
 ## Critical source map
 

@@ -29,6 +29,26 @@ class NativeStartTests(unittest.TestCase):
         for key in ("ORCHESTRATOR_SESSION_ID", "ORCHESTRATOR_HOME", "ORCHESTRATOR_CHILD"):
             os.environ.pop(key, None)
 
+    def test_native_frontend_claim_uses_supervisor_limits_once(self):
+        (self.home / "config").mkdir(exist_ok=True)
+        (self.home / "config/local.toml").write_text(
+            '[supervisor]\nfrontend_memory="5G"\nfrontend_cpus=3\n'
+        )
+        with (
+            patch("orchestrator.bootstrap.shutil.which", return_value="/fake/machine-resources"),
+            patch("orchestrator.bootstrap.subprocess.run") as run,
+        ):
+            run.return_value.returncode = 0
+            bootstrap(self.home, "pi", "native-reserved", os.getpid())
+            bootstrap(self.home, "pi", "native-reserved", os.getpid())
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args_list[0].args[0], ["/fake/machine-resources", "status"])
+        arguments = run.call_args_list[1].args[0]
+        self.assertEqual(arguments[1], "claim")
+        self.assertEqual(arguments[arguments.index("-p") + 1], str(os.getpid()))
+        self.assertEqual(arguments[arguments.index("-m") + 1], "5G")
+        self.assertEqual(arguments[arguments.index("-c") + 1], "3")
+
     def test_native_pi_bootstrap_reconnects_but_cannot_reclaim_takeover(self):
         first = bootstrap(self.home, "pi", "native-pi", reserve=False)
         self.assertEqual(first["session"]["id"], "native-pi")

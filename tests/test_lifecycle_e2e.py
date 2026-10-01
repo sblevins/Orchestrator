@@ -134,38 +134,51 @@ os.execv(args[0],args)
             f"[adapters.claude]\ncommand=[{json.dumps(str(executable))}]\n"
             f"[adapters.codex]\ncommand=[{json.dumps(str(executable))}]\n"
             "[supervisor]\npoll_seconds=0.1\nheartbeat_seconds=0.1\nstale_seconds=3\nmonitor_interval_seconds=0.1\n"
-            "[roles.planner]\ntimeout_seconds=10\n[roles.critic]\ntimeout_seconds=10\n[roles.monitor]\ntimeout_seconds=10\n"
+            "task_timeout_seconds=10\n"
         )
 
     def cleanup_service(self):
-        # Only identity-checked processes recorded in this test's private home are ours.
-        for task in self.store.tasks():
-            record = json.loads(self.store.service_value("harness:" + task["id"], "{}"))
-            if record and process_identity(record["pid"]) == record["identity"]:
-                try:
-                    os.killpg(record["pid"], signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            if (
-                task["runner_pid"]
-                and process_identity(task["runner_pid"]) == task["runner_identity"]
-            ):
-                try:
-                    os.kill(task["runner_pid"], signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-        record = json.loads(self.store.service_value("supervisor", "{}"))
-        if record and process_identity(record["pid"]) == record["identity"]:
+        # Freeze our identity-checked supervisor before discovering its children.
+        # Otherwise it can launch a runner between the cleanup snapshot and exit.
+        owned_processes = {}
+
+        def freeze_tree(pid, identity):
+            if not identity or pid in owned_processes or process_identity(pid) != identity:
+                return
             try:
-                os.kill(record["pid"], signal.SIGTERM)
+                os.kill(pid, signal.SIGSTOP)
             except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 3
-            while (
-                process_identity(record["pid"]) == record["identity"]
-                and time.monotonic() < deadline
-            ):
-                time.sleep(0.02)
+                return
+            owned_processes[pid] = identity
+            try:
+                children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+            except FileNotFoundError:
+                children = []
+            for child in children:
+                child_pid = int(child)
+                freeze_tree(child_pid, process_identity(child_pid))
+
+        record = json.loads(self.store.service_value("supervisor", "{}"))
+        if record:
+            freeze_tree(record["pid"], record["identity"])
+        # Also recover this test's detached runners if its supervisor already died.
+        for task in self.store.tasks():
+            if task["runner_pid"]:
+                freeze_tree(task["runner_pid"], task["runner_identity"])
+            harness = json.loads(self.store.service_value("harness:" + task["id"], "{}"))
+            if harness:
+                freeze_tree(harness["pid"], harness["identity"])
+        for pid, identity in reversed(list(owned_processes.items())):
+            if process_identity(pid) == identity:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        deadline = time.monotonic() + 5
+        while any(process_identity(pid) == identity for pid, identity in owned_processes.items()):
+            if time.monotonic() >= deadline:
+                self.fail("Test subprocesses did not exit before removing their private state")
+            time.sleep(0.02)
 
     def test_full_planning_review_monitor_and_restart_recovery(self):
         self.install_fake_harnesses()

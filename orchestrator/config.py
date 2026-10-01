@@ -50,6 +50,15 @@ def _number(value, context, minimum, maximum, integer=False):
         _fail(f"{context} must be finite")
 
 
+def _memory(value, context):
+    match = MEMORY.fullmatch(value) if isinstance(value, str) else None
+    if match is None:
+        _fail(f"{context} must be a positive M or G string, such as 512M or 2G")
+    megabytes = int(match[1]) * (1024 if match[2] == "G" else 1)
+    if not 64 <= megabytes <= 1048576:
+        _fail(f"{context} must be between 64M and 1024G")
+
+
 def _command(value, context):
     if not isinstance(value, list) or not value:
         _fail(f"{context} must be a nonempty argv list")
@@ -77,6 +86,10 @@ def validate_config(config: dict) -> None:
     _number(
         supervisor.get("monitor_batch_events"), "supervisor.monitor_batch_events", 1, 10000, True
     )
+    _number(supervisor.get("task_timeout_seconds"), "supervisor.task_timeout_seconds", 1, 86400)
+    for kind in ("task", "frontend"):
+        _number(supervisor.get(f"{kind}_cpus"), f"supervisor.{kind}_cpus", 1, 64, True)
+        _memory(supervisor.get(f"{kind}_memory"), f"supervisor.{kind}_memory")
     planning = _table(config, "planning")
     if planning.get("structure") != "graph":
         _fail("planning.structure must be graph")
@@ -141,16 +154,19 @@ def validate_config(config: dict) -> None:
         effort = role.get("effort")
         if not isinstance(effort, str) or effort not in ADAPTER_EFFORTS[adapter]:
             _fail(f"roles.{name}.effort is unsupported by {adapter}")
-        _number(role.get("timeout_seconds"), f"roles.{name}.timeout_seconds", 1, 86400)
-        _number(role.get("max_budget_usd"), f"roles.{name}.max_budget_usd", 0.01, 1000)
-        _number(role.get("cpus"), f"roles.{name}.cpus", 1, 64, True)
-        memory = role.get("memory")
-        match = MEMORY.fullmatch(memory) if isinstance(memory, str) else None
-        if match is None:
-            _fail(f"roles.{name}.memory must be a positive M or G string, such as 512M or 2G")
-        megabytes = int(match[1]) * (1024 if match[2] == "G" else 1)
-        if not 64 <= megabytes <= 1048576:
-            _fail(f"roles.{name}.memory must be between 64M and 1024G")
+        if "max_budget_usd" in role:
+            _fail(
+                f"roles.{name}.max_budget_usd has been removed. "
+                "Remove this key from your local/project configuration; "
+                "no per-role dollar caps are configured. "
+                "Memory, CPU, and timeout limits remain separate from spending."
+            )
+        for obsolete_key in ("timeout_seconds", "memory", "cpus"):
+            if obsolete_key in role:
+                _fail(
+                    f"roles.{name}.{obsolete_key} has been removed. "
+                    "Remove this per-role key; shared supervisor settings handle execution limits."
+                )
         tools = role.get("allowed_tools")
         if (
             not isinstance(tools, list)

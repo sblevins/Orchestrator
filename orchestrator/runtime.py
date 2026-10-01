@@ -214,7 +214,8 @@ def run_task(home: Path, task_id: str, token: str) -> int:
 
         config = task["config"]
         role = role_config(config, task["role"])
-        heartbeat = min(config["supervisor"]["heartbeat_seconds"], 1.0)
+        settings = config["supervisor"]
+        heartbeat = min(settings["heartbeat_seconds"], 1.0)
         directory = store.data / "runs" / task_id / token
         directory.mkdir(parents=True, mode=0o700)
         os.chmod(directory, 0o700)
@@ -231,7 +232,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
             project_root=Path(store.project(task["project_id"])["root"]),
             stdin_prompt=True,
         )
-        deadline = time.monotonic() + role["timeout_seconds"]
+        deadline = time.monotonic() + settings["task_timeout_seconds"]
         # A regular file avoids argv size limits and pipe backpressure deadlocks.
         with (directory / "prompt.txt").open("rb") as prompt_input:
             child = subprocess.Popen(
@@ -246,7 +247,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
         child_record = {
             "pid": child.pid,
             "identity": process_identity(child.pid),
-            "deadline": time.time() + role["timeout_seconds"],
+            "deadline": time.time() + settings["task_timeout_seconds"],
         }
         store.set_service_value("harness:" + task_id, encode(child_record))
         stdout = bytearray()
@@ -462,11 +463,11 @@ def supervise(home: Path, once: bool = False) -> None:
                         )
                 while task := store.claim_next(config["supervisor"]["max_parallel"]):
                     try:
-                        role = role_config(task["config"], task["role"])
+                        settings = task["config"]["supervisor"]
                         command = _resource_command(
-                            role["memory"],
-                            role["cpus"],
-                            role["timeout_seconds"] + 60,
+                            settings["task_memory"],
+                            settings["task_cpus"],
+                            settings["task_timeout_seconds"] + 60,
                             f"orchestrator {task['role']} {task['id']}",
                             [
                                 "run-task",

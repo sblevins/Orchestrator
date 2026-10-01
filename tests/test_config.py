@@ -45,6 +45,48 @@ class ConfigurationTests(unittest.TestCase):
             self.defaults["routing"], {"enabled": False, "rules": [], "first_mate": {}}
         )
 
+    def test_no_role_has_a_dollar_budget(self):
+        for name in self.defaults["roles"]:
+            with self.subTest(role=name):
+                self.assertNotIn("max_budget_usd", role_config(self.defaults, name))
+
+    def test_obsolete_budget_overrides_require_migration(self):
+        for relative, project in (
+            ("config/local.toml", None),
+            ("config/projects/example.toml", "example"),
+        ):
+            for name in self.defaults["roles"]:
+                with self.subTest(path=relative, role=name):
+                    path = self.write(relative, f"[roles.{name}]\nmax_budget_usd=5.0\n")
+                    try:
+                        with self.assertRaisesRegex(
+                            ConfigurationError,
+                            rf"roles\.{name}\.max_budget_usd.*removed.*Remove.*no per-role dollar caps",
+                        ):
+                            load_config(self.home, project)
+                    finally:
+                        path.unlink()
+
+    def test_shared_execution_limits_and_simple_roles(self):
+        self.assertEqual(self.defaults["supervisor"]["task_timeout_seconds"], 900)
+        for role in self.defaults["roles"].values():
+            self.assertTrue({"timeout_seconds", "memory", "cpus"}.isdisjoint(role))
+        for field, value in (("timeout_seconds", 10), ("memory", "2G"), ("cpus", 1)):
+            config = deepcopy(self.defaults)
+            config["roles"]["planner"][field] = value
+            with self.assertRaisesRegex(ConfigurationError, "shared supervisor"):
+                validate_config(config)
+        for field in ("task_memory", "frontend_memory"):
+            for value in ("63M", "1025G", "2GB", "0G", "1G;evil"):
+                config = deepcopy(self.defaults)
+                config["supervisor"][field] = value
+                with self.assertRaises(ConfigurationError):
+                    validate_config(config)
+        self.write("config/local.toml", '[supervisor]\ntask_memory="4G"\ntask_cpus=2\n')
+        configured = load_config(self.home)
+        self.assertEqual(configured["supervisor"]["task_memory"], "4G")
+        self.assertEqual(configured["supervisor"]["task_cpus"], 2)
+
     def test_graph_and_execution_defaults(self):
         self.assertEqual(
             self.defaults["planning"],
@@ -166,7 +208,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_layer_order_and_project_isolation(self):
         self.write(
             "config/local.toml",
-            '[roles.planner]\nmodel="future-model"\nallowed_tools=["Read"]\ntimeout_seconds=400\n',
+            '[roles.planner]\nmodel="future-model"\nallowed_tools=["Read"]\n[supervisor]\ntask_timeout_seconds=400\n',
         )
         self.write(
             "config/projects/alpha.toml",
@@ -176,7 +218,7 @@ class ConfigurationTests(unittest.TestCase):
         beta = load_config(self.home, "beta")["roles"]["planner"]
         self.assertEqual(alpha["model"], "project-model")
         self.assertEqual(alpha["allowed_tools"], [])
-        self.assertEqual(alpha["timeout_seconds"], 400)
+        self.assertEqual(load_config(self.home, "alpha")["supervisor"]["task_timeout_seconds"], 400)
         self.assertEqual(beta["model"], "future-model")
         self.assertEqual(beta["allowed_tools"], ["Read"])
         self.assertEqual(beta["effort"], "high")
@@ -265,7 +307,6 @@ class ConfigurationTests(unittest.TestCase):
             "model": ["", "  ", "a\x00", 5, True],
             "effort": ["unknown", [], True],
             "timeout_seconds": [0, -1, True, float("nan"), float("inf"), 86401, "60"],
-            "max_budget_usd": [0, True, float("nan"), float("inf"), 1001, "5"],
             "memory": [2, True, "0G", "2GB", "-1G", "1G;evil", "63M", "1025G", "9" * 5000 + "G"],
             "cpus": [True, 0, -1, 65, 1.5, "1"],
             "allowed_tools": ["Read", ["Bash"], ["Write"], ["Read", "Read"], [[]]],
@@ -348,10 +389,6 @@ class ConfigurationTests(unittest.TestCase):
             "adapter",
             "model",
             "effort",
-            "timeout_seconds",
-            "max_budget_usd",
-            "memory",
-            "cpus",
             "allowed_tools",
         ):
             config = deepcopy(self.defaults)

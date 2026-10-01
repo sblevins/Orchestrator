@@ -6,6 +6,12 @@ stale_seconds = 30.0
 max_parallel = 2
 monitor_interval_seconds = 60.0
 monitor_batch_events = 50
+# Shared execution safeguards, not per-role tuning.
+task_timeout_seconds = 900
+task_memory = "2G"
+task_cpus = 1
+frontend_memory = "2G"
+frontend_cpus = 1
 
 [planning]
 structure = "graph"
@@ -43,10 +49,6 @@ command = ["codex"]
 adapter = "claude"
 model = "claude-sonnet-5-5"
 effort = "low"
-timeout_seconds = 300
-max_budget_usd = 5.0
-memory = "2G"
-cpus = 1
 allowed_tools = ["Read", "Glob", "Grep"]
 prompt_path = "roles/orchestrator.md"
 
@@ -54,10 +56,6 @@ prompt_path = "roles/orchestrator.md"
 adapter = "claude"
 model = "claude-opus-5-5"
 effort = "high"
-timeout_seconds = 900
-max_budget_usd = 15.0
-memory = "2G"
-cpus = 1
 allowed_tools = ["Read", "Glob", "Grep"]
 prompt_path = "roles/planner.md"
 
@@ -65,10 +63,6 @@ prompt_path = "roles/planner.md"
 adapter = "codex"
 model = "gpt-6-astra"
 effort = "high"
-timeout_seconds = 900
-max_budget_usd = 15.0
-memory = "2G"
-cpus = 1
 allowed_tools = ["Read", "Glob", "Grep"]
 prompt_path = "roles/critic.md"
 
@@ -76,10 +70,6 @@ prompt_path = "roles/critic.md"
 adapter = "claude"
 model = "claude-opus-5-5"
 effort = "high"
-timeout_seconds = 300
-max_budget_usd = 5.0
-memory = "2G"
-cpus = 1
 allowed_tools = ["Read", "Glob", "Grep"]
 prompt_path = "roles/monitor.md"
 

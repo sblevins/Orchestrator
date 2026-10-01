@@ -17,7 +17,7 @@ Plain version: both interfaces share saved jobs and notes, while a separate loca
 `orchestrator.config` exports `load_config(home: Path, project_id: str | None = None) -> dict`, `validate_config(config: dict) -> None`, `role_config(config: dict, role: str) -> dict`, and `ConfigurationError(ValueError)`.
 Merge tracked `config/default.toml`, optional private `config/local.toml`, then optional private `config/projects/<project_id>.toml` recursively; lists replace rather than append.
 All role/model names are strings, not hardcoded model enums; validate actual structure, supported adapter effort values, bounded numbers, tool permissions, and paths.
-Runtime-critical keys: `[supervisor]` poll_seconds, heartbeat_seconds, stale_seconds, max_parallel, monitor_interval_seconds, monitor_batch_events; `[personalization]` name, communication_style; `[workers]` enabled=false; `[roles.<role>]` adapter, model, effort, timeout_seconds, max_budget_usd, memory, cpus, allowed_tools; `[adapters.<name>]` command as an argv list.
+Runtime-critical keys: `[supervisor]` poll_seconds, heartbeat_seconds, stale_seconds, max_parallel, monitor_interval_seconds, monitor_batch_events, task_timeout_seconds, task_memory, task_cpus, frontend_memory, frontend_cpus; `[personalization]` name, communication_style; `[workers]` enabled=false; `[roles.<role>]` adapter, model, effort, allowed_tools; `[adapters.<name>]` command as an argv list.
 Core role defaults: orchestrator Claude Sonnet 5.5 low, planner Claude Opus 5.5 high, critic Codex GPT-6 Astra high, monitor Claude Opus 5.5 high.
 The installed Claude CLI supports low, medium, high, xhigh, and max; model-specific availability still requires validation.
 `[routing]` is disabled and contains empty rules, with no worker model default.

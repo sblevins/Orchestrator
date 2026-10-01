@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en" data-theme="luxury">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Orchestrator: fast conversation, independent planning and criticism, and durable project state. Current implementation and the research behind it.">
+<title>Orchestrator | Fast conversation. Reliable project state.</title>
+<link rel="stylesheet" href="style.css">
+<script src="theme.js" defer></script>
+</head>
+<body>
+<main>
+<div class="toolbar"><span class="eyebrow">Orchestrator / public implementation brief</span><button id="theme-button" type="button" aria-label="Switch to light theme" aria-pressed="false" hidden>Light / dark</button></div>
+<header>
+<h1>Fast conversation.<br>Deep specialist work.<br>Reliable project state.</h1>
+<p class="subtitle">A neutral, project-bound coordinator inspired by First Mate, with separate planning, criticism, and ongoing oversight.</p>
+<p class="note">A public adaptation of the original Lavish research page, preserving its layout, luxury/silk appearance, and architecture diagram.
+The research has been updated to distinguish shipped behavior from future work.</p>
+</header>
+<nav class="top-nav" aria-label="Report sections"><a href="#current">Included now</a><a href="#start">Start</a><a href="#models">Model choices</a><a href="#firstmate">First Mate ideas</a><a href="#graphs">Graphs and plugins</a><a href="#reliability">Reliable tracking</a><a href="#research">Historical research</a></nav>
+<!-- Original research SVG, with its execution gate relabeled for current scope. -->
+<div class="diagram"><svg viewBox="0 0 900 380" role="img" aria-labelledby="diagram-title diagram-description"><title id="diagram-title">Fast interaction and separate specialist agents</title><desc id="diagram-description">The user talks with the fast coordinator. A durable supervisor records tasks and invokes the planner, independent critic, and monitor. Plans require review and permission. Worker execution is not implemented.</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker></defs>
+<g id="interaction" fill="none" stroke="currentColor" stroke-width="1.5"><title>User interaction remains responsive</title><rect x="20" y="20" width="150" height="66" rx="10"/><rect x="250" y="20" width="270" height="66" rx="10"/><rect x="620" y="20" width="260" height="66" rx="10"/><path d="M175 53 H245" marker-end="url(#arrow)"/><path d="M525 53 H615" marker-end="url(#arrow)"/></g>
+<g text-anchor="middle" font-size="20"><text x="95" y="60">You</text><text x="385" y="49">Fast coordinator</text><text x="385" y="71" font-size="14">clarify · delegate · explain</text><text x="750" y="49">Durable supervisor</text><text x="750" y="71" font-size="14">save · dispatch · recover</text></g>
+<g id="specialists" fill="none" stroke="currentColor" stroke-width="1.5"><title>Specialists operate as tracked tasks</title><path d="M750 90 V122 H165 V165" marker-end="url(#arrow)"/><path d="M450 122 V165" marker-end="url(#arrow)"/><path d="M750 122 V165" marker-end="url(#arrow)"/><rect x="35" y="170" width="260" height="70" rx="10"/><rect x="320" y="170" width="260" height="70" rx="10"/><rect x="620" y="170" width="260" height="70" rx="10"/></g>
+<g text-anchor="middle" font-size="20"><text x="165" y="201">Powerful planner</text><text x="165" y="222" font-size="14">design + alternatives</text><text x="450" y="201">Independent critic</text><text x="450" y="222" font-size="14">check plan + implications</text><text x="750" y="201">Slow monitor</text><text x="750" y="222" font-size="14">observe + submit corrections</text></g>
+<g id="execution-gate" fill="none" stroke="currentColor" stroke-width="1.5"><title>Plan review gate; worker execution is disabled</title><path d="M165 245 V280 H450 V307" marker-end="url(#arrow)"/><path d="M450 245 V280"/><path d="M750 245 V280 H450" stroke-dasharray="5 5"/><rect x="190" y="312" width="520" height="52" rx="10"/></g><text x="450" y="344" text-anchor="middle" font-size="19">Plan review + approval · workers disabled</text>
+</svg><div class="mobile-flow"><strong>You → fast coordinator → durable supervisor</strong><p>The supervisor tracks the planner, independent critic, and slow monitor.</p><p>Plans require review and approval. Worker execution is disabled.</p></div><p class="note">Plain version: the quick model keeps talking with you, stronger models design and check the work, and software saves the jobs and approvals. Implementation workers come later.</p></div>
+<section id="current">
+<h2>Bottom line: a durable planning foundation</h2>
+<p>The current implementation is a <strong>local Python/SQLite supervisor with native Claude Code and Pi frontends</strong>.
+It saves project state, runs independent planning and criticism, and supervises a slow background monitor.
+It is not a Temporal deployment or a third-party Pi orchestration plugin.</p>
+<blockquote><p><strong>Worker routing and worker execution are disabled, including after plan approval.</strong>
+This release can develop and review plans; it cannot yet send implementation workers to change your project.</p></blockquote>
+<p>Plain version: the quick model talks with you, stronger models design and check the work, and software remembers the jobs.
+The part that sends workers to make changes comes later.</p>
+<div class="table-wrap"><table>
+<caption>Current implementation versus later execution</caption>
+<thead><tr><th scope="col">Area</th><th scope="col">Implemented now</th><th scope="col">Not implemented</th></tr></thead>
+<tbody>
+<tr><th scope="row">Planning</th><td>Planner-to-critic handoff, graph validation/readiness, bounded revisions, blocking findings, explicit operator approval</td><td>Executing the approved graph with implementation workers</td></tr>
+<tr><th scope="row">Project memory</th><td>Canonical project roots, private notes with revision checks, one active coordinator, observer sessions and explicit takeover</td><td>Distributed ownership across machines</td></tr>
+<tr><th scope="row">Supervision</th><td>Detached runners, deadlines, cancellation, process identity checks, saved events, restart reconciliation</td><td>Installed boot service or automatic recovery from every host failure</td></tr>
+<tr><th scope="row">Integration</th><td>Native Claude hooks/MCP and an owned Pi extension over the same state</td><td>Third-party plugin selection, visual graph editor, automatic shipping</td></tr>
+</tbody></table></div>
+<p class="note">Implementation evidence: <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/status.md">current status</a>, <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/runtime.md">runtime</a>, and <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/firstmate-coverage.md">First Mate coverage</a>.
+These describe the scope, not a guarantee of live model quality or account access.</p>
+</section>
+<section id="start">
+<h2>1. Open the native frontend</h2>
+<p>From the cloned repository, run either native interface:</p>
+<pre><code>cd /path/to/Orchestrator
+claude
+# Or:
+pi</code></pre>
+<p>On first use, approve native project trust and the local Orchestrator integration when prompted.
+The repository hooks or extension initialize the coordinator; no separate launcher is required.
+Tell it which project to work on and the project's existing directory.</p>
+<p>Requirements: Linux, Python 3.11+, <code>machine-resources</code>, authenticated Claude Code and Codex for the default specialist roles, and Pi if choosing that frontend.
+No Python runtime dependencies need installing.</p>
+<p><strong>Native model precedence matters.</strong>
+Pi selects the configured orchestrator role automatically.
+Native Claude respects its own CLI and settings precedence, so a global wrapper or model pin can override the repository's Sonnet/low foreground preference.
+Use Claude's <code>/model</code> and <code>/effort</code>, or the optional <code>bin/orchestrator start</code> launcher, to apply your desired foreground settings.
+Background roles use Orchestrator's TOML configuration.</p>
+<p>Plain version: starting Claude normally may keep the model you already chose for Claude.
+That does not change which models this project uses for background planning and checking.</p>
+<p>See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/frontends.md">frontend setup</a> and <a href="https://github.com/sblevins/Orchestrator/blob/main/README.md">the repository guide</a> for project registration, observer mode, and takeover.</p>
+</section>
+<section id="models">
+<h2>2. Agreed models and effort</h2>
+<p>These are the tracked defaults, not an orchestration leaderboard.
+Model identifiers request a configuration; they do not prove availability through your account or installed harness.</p>
+<div class="table-wrap"><table>
+<caption>Core roles from config/default.toml</caption>
+<thead><tr><th scope="col">Role</th><th scope="col">Adapter / model</th><th scope="col">Effort</th><th scope="col">Responsibility</th></tr></thead>
+<tbody>
+<tr data-role="orchestrator"><th scope="row">Fast orchestrator</th><td>Claude adapter · Sonnet 5.5<br><code>claude-sonnet-5-5</code></td><td>low</td><td>Clarify, delegate, explain; foreground caveat above</td></tr>
+<tr data-role="planner"><th scope="row">Planner</th><td>Claude adapter · Opus 5.5<br><code>claude-opus-5-5</code></td><td>high</td><td>Design, alternatives, dependencies, acceptance criteria</td></tr>
+<tr data-role="critic"><th scope="row">Independent critic</th><td>Codex adapter · GPT-6 Astra<br><code>gpt-6-astra</code></td><td>high</td><td>Check the plan against the request and evidence</td></tr>
+<tr data-role="monitor"><th scope="row">Slow monitor</th><td>Claude adapter · Opus 5.5<br><code>claude-opus-5-5</code></td><td>high</td><td>Review consequential decisions and surface corrections</td></tr>
+</tbody></table></div>
+<p><strong>Fable is only an alternative for future deep-audit evaluation, not a default.</strong>
+There are no worker model defaults.
+Workers and routing remain disabled, and First Mate dispatch profiles have not yet been imported or populated.</p>
+<p>Tracked settings live in <code>config/default.toml</code>; private overrides live in <code>config/local.toml</code> and <code>config/projects/PROJECT_ID.toml</code>.
+Each role configures its adapter, model, and effort.
+Shared supervisor timeouts and resource reservations protect the machine without requiring separate limits for every role.
+There is no enforced dollar spending cap.
+See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/configuration.md">configuration</a> for the supported fields.</p>
+<h3>Four roles for planning, two ongoing roles</h3>
+<p>The planner and critic run as temporary specialists during planning and substantial replanning.
+The fast orchestrator and slow monitor remain the ongoing roles.
+The monitor is an event-driven role, not a model continuously generating text.</p>
+<p>Every user prompt is saved for review.
+Exact routine status questions do not wake an expensive monitor call, but ambiguous or consequential requests do.
+The orchestrator can request extra scrutiny; it cannot veto the program's required reviews.</p>
+<p>Plain version: you can ask for progress without starting another deep review.
+Important new requests are saved and checked in the background.</p>
+<h3>Why split the roles?</h3>
+<p>The orchestrator still needs reliable tool use and delegation, even when another model does the planning.
+An independent critic needs the original request and evidence, not just the planner's persuasive summary.
+Different providers can still make the same factual mistake.</p>
+<p>Plain version: choosing the right job matters as much as doing it.
+A second model checks the work, but its answer still needs evidence.</p>
+<p>Public speed rankings do not measure time to a useful answer and correct dispatch in this project.
+Live model/effort acceptance, latency, monitoring quality, and costs still need workload-specific evaluation.</p>
+</section>
+<section id="firstmate">
+<h2>3. What we borrowed from First Mate</h2>
+<p><a href="https://github.com/kunchenguid/firstmate">First Mate</a> inspired the persistent project coordination, operational tracking, and background supervision.
+This is an independent implementation, not an official First Mate project; no First Mate code was copied.</p>
+<div class="table-wrap"><table>
+<caption>Operational ideas and their current adaptation</caption>
+<thead><tr><th scope="col">First Mate idea</th><th scope="col">Adaptation here</th><th scope="col">Boundary</th></tr></thead>
+<tbody>
+<tr><th scope="row">Durable worker identity</th><td>Saved tasks, immutable events, attempt tokens and process-start identity</td><td>Current specialist runners, not implementation workers</td></tr>
+<tr><th scope="row">Matched requests and replies</th><td>Per-session inboxes, exact acknowledgment, reconnect redelivery</td><td>Delivery is distinct from accepting a result</td></tr>
+<tr><th scope="row">Conservative status</th><td>Unknown outcomes stay visible; no blind replay</td><td>Does not promise exactly-once external effects</td></tr>
+<tr><th scope="row">Knowledge curation</th><td>Private project notes with revision checks, separated from runtime facts</td><td>No added knowledge-graph infrastructure</td></tr>
+<tr><th scope="row">Cheap monitoring</th><td>Software polling plus bounded model reviews, cooldowns and review cursors</td><td>Not a complete successor-rearming supervision host</td></tr>
+<tr><th scope="row">Dispatch profiles</th><td>Reserved future policy: monitor selects plan workers; orchestrator selects unrelated workers</td><td>Deferred, with both routing and execution disabled</td></tr>
+</tbody></table></div>
+<p>The current source audit uses First Mate revision <code>8f756bbc287c5bdfacc64a7cc09e8516c64fc919</code>.
+It corrects the original research: First Mate already supports a Claude primary with persistent headless supervision, and its wake queue has actor-scoped, generation-aware and unread-outcome recovery.
+The earlier wake-drain concern is not a current finding.</p>
+<p>We intentionally exclude the pirate persona, terminal keystroke injection, implicit approval, unrestricted specialist shell tools, and silent model fallback.</p>
+<p>Plain version: keep the saved records and careful supervision, without copying every automation or giving models permission to approve their own work.</p>
+<p>Read the <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/firstmate-coverage.md">coverage map</a> and <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/research/firstmate-audit.md">feature-family audit</a> for adopt/defer/reject decisions.</p>
+</section>
+<section id="graphs">
+<h2>4. Graphs, frameworks, and useful plugins</h2>
+<p>A <strong>task graph</strong> records dependencies; a <strong>workflow</strong> describes planning and review steps; a <strong>knowledge graph</strong> connects facts and evidence.
+The current program validates task graphs and exposes readiness through tools and the CLI, without a graph database or visual editor.</p>
+<p>Plain version: one says which jobs must finish first, one says which step comes next, and one connects facts.
+The saved task state is the authority, not a drawing.</p>
+<div class="table-wrap"><table>
+<caption>Research options versus the implemented choice</caption>
+<thead><tr><th scope="col">Option</th><th scope="col">Useful idea</th><th scope="col">Current decision</th></tr></thead>
+<tbody>
+<tr><th scope="row">Local Python/SQLite supervisor</th><td>Transactional tasks and events, local process reconciliation, narrow harness adapters</td><td><strong>Implemented.</strong> Single-host operation, explicit restart limitations</td></tr>
+<tr><th scope="row"><a href="https://docs.temporal.io/workflow-execution">Temporal</a></th><td>Durable workflow history, retries, timers and distributed recovery</td><td>Historical evaluation recommendation, not the chosen runtime</td></tr>
+<tr><th scope="row"><a href="https://docs.langchain.com/oss/python/langgraph/checkpointers">LangGraph</a></th><td>Explicit graph state, checkpoints and interrupts</td><td>Research alternative, not installed; persistent checkpoints alone do not supervise external processes</td></tr>
+<tr><th scope="row"><a href="https://github.com/nicobailon/pi-messenger">Pi Messenger</a></th><td>Dependency-aware tasks and planner/reviewer workflows</td><td>Historical prototype suggestion, <strong>not a user decision</strong> or dependency</td></tr>
+<tr><th scope="row"><a href="https://github.com/nicobailon/pi-subagents">Pi Subagents</a></th><td>Background delegation and mission records</td><td>Research candidate only; saved jobs alone do not establish restart-safe execution</td></tr>
+<tr><th scope="row"><a href="https://github.com/edxeth/pi-subagents">edxeth/pi-subagents</a> / <a href="https://github.com/azmeenafandi/brl-subagent">BRL Subagent</a></th><td>Coordinator UX and bounded dependency-graph experiments</td><td>Not integrated; no current compatibility or recovery guarantee claimed</td></tr>
+</tbody></table></div>
+<p>No third-party Pi orchestration plugin has been chosen for the user.
+The owned Pi extension and Claude frontend share one supervisor rather than maintaining competing task lists.</p>
+</section>
+<section id="reliability">
+<h2>5. What “does not lose track” means here</h2>
+<ul>
+<li>Save task intent and durable events; identify attempts and actual processes before accepting results.</li>
+<li>Keep notifications until explicitly acknowledged, and redeliver after reconnect.</li>
+<li>Validate dependency graphs, enforce review holds, and reserve approval for explicit operator commands.</li>
+<li>Separate private project knowledge from live runtime state; use revision checks when changing notes.</li>
+<li>Apply deadlines, cancellation, bounded review rounds and machine resource reservations outside the model.</li>
+<li>Reconcile unfinished work after restart, preserving uncertainty instead of silently replaying it.</li>
+</ul>
+<p>Plain version: closing the chat does not erase the job list.
+When a result is uncertain, the program says so instead of pretending the job finished or starting it twice.</p>
+<h3>Limits that matter</h3>
+<p>The supervisor can outlive the frontend, but no boot service is installed.
+After a supervisor crash or reboot, it must be started again; binding or resuming a project starts it.
+Read-only harness settings are not protection against hostile programs sharing the same operating-system account.</p>
+<p>Offline tests exercise real subprocesses with fake model harnesses, graph constraints, session reconnection and recovery boundaries.
+They do not establish paid model access, answer quality, native microphone behavior, or live Claude idle wakeup.
+Harness-reported costs are not verified per-turn spending totals.</p>
+<p>The next step is native frontend and planning acceptance testing, followed by a separate worker-routing and execution implementation.
+Plan-related workers will be selected by the monitor; unrelated on-demand workers by the orchestrator, both under First Mate's guidelines.</p>
+</section>
+<section id="research" class="appendix">
+<h2>Historical research and source notes</h2>
+<p>This public page adapts the original research artifact rather than publishing its full private appendices.
+The original layout, hero, SVG, and research comparisons are retained; stale implementation advice, private paths and session details are not.</p>
+<details><summary>Earlier recommendations, and what changed</summary><div class="appendix-body">
+<p><strong>Historical, not current setup instructions.</strong>
+The original brief was a research proposal with no implementation claim.
+It suggested a Pi Messenger trial and evaluating Temporal as the lifecycle authority.
+Neither suggestion became a user-approved plugin selection or the current runtime.</p>
+<p>That brief inspected First Mate revision <code>70aeba8</code>.
+The later audit supersedes its wake-queue criticism and its incomplete account of Claude-primary support.
+The current implementation independently adopts operational patterns using Python and SQLite.</p>
+<p>The earlier model shortlist and public latency figures were evaluation candidates, not measured results for this system.
+The agreed defaults above replace that shortlist as configuration guidance.
+Fable remains an alternative, and worker models remain unassigned.</p>
+<p>Plain version: the earlier page compared possible approaches.
+This page explains what was actually built, and clearly marks the parts still only being considered.</p>
+</div></details>
+<details><summary>Evidence and evaluation checklist</summary><div class="appendix-body">
+<p>Evaluate the exact harness, model, effort and tool combination together.
+Measure first useful response, valid delegation, plan and critique quality, missed decisions, monitor delay, stale-result handling and cost per accepted outcome.</p>
+<p>Fault tests should cover crashed processes, duplicate or missing notifications, out-of-order results, cancelled work, changed plans, stale approvals and simultaneous projects.
+A heartbeat means a process is alive, not that its work is useful.</p>
+<p>Plain version: test both whether the models do good work and whether the program keeps accurate records when something breaks.</p>
+<ul>
+<li><a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic: multi-agent research systems</a></li>
+<li><a href="https://www.anthropic.com/engineering/building-effective-agents">Anthropic: building effective agents</a></li>
+<li><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Anthropic: context engineering</a></li>
+<li><a href="https://platform.claude.com/docs/en/models/overview">Claude model catalog</a> and <a href="https://developers.openai.com/api/docs/models">OpenAI model catalog</a></li>
+<li><a href="https://artificialanalysis.ai/methodology">Artificial Analysis methodology</a>: benchmark settings are not application latency guarantees</li>
+</ul>
+</div></details>
+</section>
+<footer><p class="note">Portable public export: no external assets, telemetry, feedback service, or runtime server.
+The light/dark button changes only this page's appearance.
+For authoritative setup and current limitations, use the <a href="https://github.com/sblevins/Orchestrator/blob/main/README.md">repository guide</a> and <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/status.md">status document</a>.</p></footer>
+</main>
+</body>
+</html>

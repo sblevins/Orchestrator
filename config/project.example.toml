@@ -3,12 +3,8 @@
 # digits, underscores and hyphens (maximum 128 characters).
 # This overrides local settings only for this project.
 [roles.planner]
-timeout_seconds = 1200
-max_budget_usd = 20.0
 
 [roles.critic]
-timeout_seconds = 1200
-max_budget_usd = 20.0
 
 # Select a custom template by safe name, never by a filesystem path.
 # Put private templates in <home>/config/workflows/<name>.json.

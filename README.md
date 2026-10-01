@@ -1,6 +1,10 @@
 # Orchestrator
 
+**[Read the visual explainer](https://sblevins.github.io/Orchestrator/explainer/)** · [Open the HTML locally](docs/explainer/index.html) · [Default settings](config/default.toml)
+
 A neutral, project-scoped coordinator with native **Claude Code and Pi** interfaces.
+Inspired by [FirstMate](https://github.com/kunchenguid/firstmate), especially its persistent project coordination, durable task tracking, and background supervision.
+This is an independent implementation, not an official FirstMate project.
 Claude Code is preferred so its own voice interface remains available.
 The fast orchestrator talks with you; a planner develops graph-based plans, an independent critic checks them, and a slow monitor reviews important decisions in the background.
 
@@ -46,8 +50,23 @@ Background roles always use Orchestrator configuration.
 Tracked defaults live in `config/default.toml`.
 Private `config/local.toml` overrides them; `config/projects/PROJECT_ID.toml` adds project preferences.
 If you have no private configuration yet, run `./bin/orchestrator config init`.
-Edit any role's model, effort, budgets, deadlines, and resource reservations without changing Python code.
+Edit each role's model and effort without changing Python code.
+Shared background settings handle deadlines and machine-resource reservations; roles do not need individual timeout, CPU, or memory parameters.
+There is no per-role dollar budget or spending-cap parameter.
 Model identifiers are requests, not a guarantee of account access or measured superiority.
+
+The agreed defaults are included in [`config/default.toml`](config/default.toml), not just in the explainer:
+
+| Role | Adapter | Model | Effort |
+| --- | --- | --- | --- |
+| Fast orchestrator | Claude | `claude-sonnet-5-5` | `low` |
+| Planner | Claude | `claude-opus-5-5` | `high` |
+| Independent critic | Codex | `gpt-6-astra` | `high` |
+| Slow monitor | Claude | `claude-opus-5-5` | `high` |
+
+Worker routing remains disabled with no default worker model or effort.
+Fable and the other models discussed in the research remain alternatives, not silently enabled defaults.
+Native Claude foreground selection still follows its own settings and CLI precedence; background roles and native Pi use the configured roles.
 
 ```toml
 [personalization]
@@ -94,7 +113,7 @@ There is no distributed scheduler, automatic publishing, automatic permission ap
 This is a single-machine implementation, not a Temporal deployment.
 The supervisor survives frontend exits, but an OS restart or supervisor crash requires starting it again; binding or resuming a project in either frontend does this.
 Native voice, live model access, and Claude's idle wake behavior require interactive acceptance testing.
-Codex has no enforced dollar cap in this implementation; deadlines still apply.
+No per-role dollar cap is imposed on either specialist adapter; deadlines and machine-resource limits still apply.
 Plain version: the durable planning foundation is ready to try, but it cannot yet send workers to change your project.
 
 ## Checks and documentation

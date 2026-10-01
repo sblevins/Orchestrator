@@ -78,7 +78,7 @@ def _reserve_frontend(store: Store, frontend: str, pid: int, config: dict) -> No
     executable = shutil.which("machine-resources")
     if not executable:
         raise StateError("machine-resources is required for native frontend accounting")
-    role = config["roles"]["orchestrator"]
+    settings = config["supervisor"]
     subprocess.run([executable, "status"], check=True, capture_output=True, timeout=10)
     result = subprocess.run(
         [
@@ -87,9 +87,9 @@ def _reserve_frontend(store: Store, frontend: str, pid: int, config: dict) -> No
             "-p",
             str(pid),
             "-m",
-            role["memory"],
+            settings["frontend_memory"],
             "-c",
-            str(role["cpus"]),
+            str(settings["frontend_cpus"]),
             "-d",
             f"Orchestrator native {frontend}",
             "-e",

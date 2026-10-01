@@ -1,7 +1,7 @@
 # Copy to <home>/config/local.toml, keep private, and chmod 600.
 # Tables merge recursively. Lists replace, so [] removes all allowed tools.
 [personalization]
-name = "Stephen"
+name = "User"
 communication_style = "Concise, neutral, practical. No pirate language. Use independent evidence and never automatically approve code execution."
 
 [frontends]

@@ -19,10 +19,10 @@ An empty configured list disables built-in tools rather than restoring defaults.
 `--settings '{}'` suppresses the installed wrapper's global model pin, while `--setting-sources ''` excludes user/project/local settings and their recursive orchestration hooks.
 `--strict-mcp-config` excludes inherited MCP servers, and `--disable-slash-commands` disables skills.
 Managed policy can still apply; these flags are not a permission bypass or an operating-system sandbox.
-The dollar limit is passed as `--max-budget-usd`.
+No dollar budget field is configured and no `--max-budget-usd` flag is passed.
 A saved conversation uses `--resume ID` with the same explicit model, effort, and permission controls.
 The runtime must set the subprocess working directory to `cwd`; Claude has no corresponding cwd argument here.
-Plain version: Claude can use only the configured reading tools, cannot ask for approval, and is told which model and spending limit to use.
+Plain version: Claude can use only the configured reading tools, cannot ask for approval, and is told which model and effort to use.
 
 Codex receives `-a never exec -s read-only -C CWD -m MODEL -c 'model_reasoning_effort="EFFORT"' --json --output-last-message PATH -- PROMPT`.
 The effort value is encoded with `json.dumps` after config validation, producing a quoted TOML-compatible string rather than executable text.
@@ -37,8 +37,8 @@ Codex has no equivalent to Claude's `Read,Glob,Grep` tool allowlist.
 Its read-only sandbox can run shell-based inspection; `allowed_tools` does not disable individual Codex tools or shell commands.
 User configuration and rules are deliberately excluded from specialists; the project-specific role contract and operator-managed policies define their authority.
 Authentication environment and administrator policy still apply, and filesystem sandboxing alone does not confine every external service.
-Codex has no supported dollar-cap flag here: `max_budget_usd` is not enforced for Codex, and token counts are not converted into an invented price.
-Runtime must expose that limitation, and must refuse Codex dispatch if its policy requires an enforceable dollar cap or a Claude-equivalent tool allowlist.
+Neither adapter has a per-role spending cap; token counts are not converted into an invented dollar price.
+Codex dispatch rejects unsupported per-tool restrictions rather than silently widening permissions.
 Plain version: Codex is told not to write project files, but that does not limit every outside service or guarantee a spending limit.
 
 ## Normalized results
