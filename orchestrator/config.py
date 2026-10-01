@@ -18,7 +18,8 @@ ADAPTER_EFFORTS = {
     "codex": {"minimal", "low", "medium", "high", "xhigh"},
 }
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep"}
-PROJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+PROJECT_ID = SAFE_IDENTIFIER
 MEMORY = re.compile(r"([1-9][0-9]{0,6})([MG])\Z")
 
 
@@ -74,6 +75,18 @@ def validate_config(config: dict) -> None:
     _number(supervisor.get("max_parallel"), "supervisor.max_parallel", 1, 64, True)
     _number(supervisor.get("monitor_batch_events"),
             "supervisor.monitor_batch_events", 1, 10000, True)
+    planning = _table(config, "planning")
+    if planning.get("structure") != "graph":
+        _fail("planning.structure must be graph")
+    workflow = planning.get("workflow")
+    if not isinstance(workflow, str) or not SAFE_IDENTIFIER.fullmatch(workflow):
+        _fail("planning.workflow must be a safe identifier: 1-128 ASCII letters, digits, "
+              "underscores or hyphens, beginning with a letter or digit")
+    _number(planning.get("max_review_rounds"), "planning.max_review_rounds", 1, 100, True)
+    execution = _table(config, "execution")
+    _number(execution.get("max_parallel"), "execution.max_parallel", 1, 64, True)
+    if execution.get("dependency_failure") not in ("block", "cancel"):
+        _fail("execution.dependency_failure must be block or cancel")
     personalization = _table(config, "personalization")
     for key in ("name", "communication_style"):
         _text(personalization.get(key), f"personalization.{key}")

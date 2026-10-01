@@ -36,6 +36,41 @@ Boolean values are not numbers.
 Defaults request concise, neutral, practical responses, independent evidence, no pirate language, and no automatic approval of code execution or permission requests.
 These preferences inform prompts; they do not replace adapter permission enforcement.
 
+## Planning graphs and workflows
+
+`planning.structure` is required and currently accepts only `"graph"`.
+`planning.workflow` defaults to `"plan-review"` and selects a workflow template by name, not by path.
+Names follow the same safe identifier rules as project identifiers: 1-128 ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit.
+`planning.max_review_rounds` defaults to 3 and accepts integers from 1 through 100, excluding booleans.
+Reaching this limit does not mean the critic approved the plan.
+
+Tracked templates live at `workflows/<name>.json`; private replacements live at `<home>/config/workflows/<name>.json` and take precedence for that name.
+Select the name in local or project TOML to customize the workflow.
+There are no configurable template-directory or arbitrary-path settings.
+The config loader validates the selected name only; the graph module owns template loading, missing-template errors, template validation, and path containment checks.
+A valid configuration is not proof that a template exists or that its graph is valid.
+Protect private workflow templates with the same file permissions as private TOML overrides.
+Plain version: choose a workflow by its short name, and put your customized version in the private workflow folder.
+The program must check that file before using it.
+
+The planner must return a JSON object with `summary` as a string, `assumptions`, `risks`, and `questions` as string lists, and `nodes` as a list of node objects.
+Each node has string `id`, `title`, and `description` fields; string lists `depends_on` and `acceptance_criteria`; and `kind` equal to `work`, `review`, or `approval`.
+The graph must have unique identifiers, valid dependency references, and no cycles or self-dependencies.
+The critic must return a JSON object with `verdict` equal to `approved` or `changes_requested`, and a `findings` list.
+The monitor must return a JSON object with integer `reviewed_through` and a `findings` list whose entries have `severity` equal to `info`, `warning`, or `blocking`, string `summary`, and optional string `evidence` and `proposed_action`.
+All roles put explanations inside their JSON, without surrounding prose or Markdown fences.
+Prompts specify these response contracts, but the consuming program must validate responses independently.
+Plain version: the roles return named fields the program can check, not just a paragraph saying the work is ready.
+
+`execution.max_parallel` defaults to 3 and accepts integers from 1 through 64, excluding booleans.
+It is the graph-execution concurrency limit, separate from `supervisor.max_parallel` for supervisor-managed role runs; one setting does not overwrite the other.
+`execution.dependency_failure` defaults to `"block"` and also accepts `"cancel"`.
+The runtime must enforce the chosen policy for dependent nodes when a prerequisite fails and must never treat a failed prerequisite as completed successfully.
+It must allow a node to start only when its dependencies have actually succeeded and required approvals are present.
+These settings do not implement a scheduler, validate graphs, approve execution, or enable workers.
+Plain version: the program, not a model's promise, must prevent a task from starting too early.
+If required work fails, tasks that need it stay blocked or are cancelled according to your setting.
+
 ## Roles and adapters
 
 Exactly four core roles are configured: `orchestrator`, `planner`, `critic`, and `monitor`.
@@ -70,6 +105,8 @@ There is no shell interpolation and no automatic approval setting.
 
 `frontends.preferred` defaults to `claude` and also accepts `pi`.
 `frontends.claude.command` and `frontends.pi.command` follow the same executable-only argv format.
+An executable launcher script is valid, for example `["/absolute/path/to/pi-launcher"]`; an interpreter-plus-script list or extra command-line flags is not.
+Launcher scripts are trusted local programs, not an escape from specialist read-only restrictions.
 Pi is an interactive frontend, not a supported specialist adapter.
 Claude remains the preferred interactive frontend, with native voice handled by Claude itself.
 

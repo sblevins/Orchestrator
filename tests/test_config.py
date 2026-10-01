@@ -40,6 +40,75 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(self.defaults["routing"],
                          {"enabled": False, "rules": [], "first_mate": {}})
 
+    def test_graph_and_execution_defaults(self):
+        self.assertEqual(self.defaults["planning"], {
+            "structure": "graph", "workflow": "plan-review", "max_review_rounds": 3,
+        })
+        self.assertEqual(self.defaults["execution"], {
+            "max_parallel": 3, "dependency_failure": "block",
+        })
+
+    def test_custom_workflow_and_execution_overrides(self):
+        self.write("config/local.toml", '[planning]\nworkflow="custom-review_2"\n'
+                   'max_review_rounds=5\n[execution]\nmax_parallel=4\n'
+                   'dependency_failure="cancel"\n')
+        self.write("config/projects/alpha.toml", '[planning]\nworkflow="project-review"\n'
+                   '[execution]\nmax_parallel=2\n')
+        local = load_config(self.home)
+        project = load_config(self.home, "alpha")
+        self.assertEqual(local["planning"]["workflow"], "custom-review_2")
+        self.assertEqual(project["planning"]["workflow"], "project-review")
+        self.assertEqual(project["planning"]["max_review_rounds"], 5)
+        self.assertEqual(project["planning"]["structure"], "graph")
+        self.assertEqual(project["execution"], {"max_parallel": 2, "dependency_failure": "cancel"})
+        self.assertEqual(local["execution"]["max_parallel"], 4)
+        # Config selects a name. The graph module owns template loading and validation.
+        self.assertFalse((self.home / "config/workflows").exists())
+
+    def test_invalid_planning_and_execution_settings(self):
+        cases = {
+            ("planning", "structure"): [None, "list", "", [], True],
+            ("planning", "workflow"): [None, "", "../escape", "/tmp/escape", "a/b", "a\\\\b",
+                                       "a.json", "a\n", "a\x00", "é", "a" * 129, True, 1, []],
+            ("planning", "max_review_rounds"): [None, True, 0, -1, 101, 1.5, "3",
+                                                float("nan"), float("inf")],
+            ("execution", "max_parallel"): [None, True, 0, -1, 65, 1.5, "3",
+                                             float("nan"), float("inf")],
+            ("execution", "dependency_failure"): [None, "ignore", "continue", "", [], True],
+        }
+        for (section, key), values in cases.items():
+            for value in values:
+                with self.subTest(section=section, key=key, value=value):
+                    config = deepcopy(self.defaults)
+                    config[section][key] = value
+                    with self.assertRaises(ConfigurationError):
+                        validate_config(config)
+            config = deepcopy(self.defaults)
+            del config[section][key]
+            with self.subTest(section=section, missing=key):
+                with self.assertRaises(ConfigurationError):
+                    validate_config(config)
+
+    def test_planning_execution_boundaries(self):
+        for rounds, parallel, workflow in ((1, 1, "a"), (100, 64, "A" * 128)):
+            config = deepcopy(self.defaults)
+            config["planning"].update(max_review_rounds=rounds, workflow=workflow)
+            config["execution"]["max_parallel"] = parallel
+            validate_config(config)
+
+    def test_frontend_launcher_executables(self):
+        for name in ("claude", "pi"):
+            config = deepcopy(self.defaults)
+            executable = f"/private/tools/{name}-launcher"
+            config["frontends"][name]["command"] = [executable]
+            validate_config(config)
+            for command in ([executable, "--flag"], [executable, "--dangerously-skip-permissions"],
+                            executable, []):
+                with self.subTest(frontend=name, command=command):
+                    config["frontends"][name]["command"] = command
+                    with self.assertRaises(ConfigurationError):
+                        validate_config(config)
+
     def test_layer_order_and_project_isolation(self):
         self.write("config/local.toml", '[roles.planner]\nmodel="future-model"\n'
                    'allowed_tools=["Read"]\ntimeout_seconds=400\n')
@@ -171,7 +240,8 @@ class ConfigurationTests(unittest.TestCase):
                     validate_config(config)
 
     def test_required_tables_and_fields(self):
-        for key in ("supervisor", "personalization", "workers", "routing", "roles", "adapters"):
+        for key in ("supervisor", "planning", "execution", "personalization", "workers",
+                    "routing", "roles", "adapters"):
             for replacement in (None, [], "table"):
                 with self.subTest(key=key, replacement=replacement):
                     config = deepcopy(self.defaults)

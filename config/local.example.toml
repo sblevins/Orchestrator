@@ -7,6 +7,21 @@ communication_style = "Concise, neutral, practical. No pirate language. Use inde
 [frontends]
 preferred = "claude" # "pi" also supported; native Claude voice stays in Claude.
 
+# Launcher scripts are supported as a single executable, without extra arguments.
+# [frontends.claude]
+# command = ["/absolute/path/to/claude-launcher"]
+# [frontends.pi]
+# command = ["/absolute/path/to/pi-launcher"]
+
+[planning]
+structure = "graph"
+workflow = "plan-review" # Selects workflows/<name>.json or config/workflows/<name>.json.
+max_review_rounds = 3
+
+[execution]
+max_parallel = 3
+dependency_failure = "block" # Or "cancel" for dependent nodes after failure.
+
 # Model identifiers are passed unchanged; confirm availability with your provider.
 [roles.orchestrator]
 model = "claude-sonnet-5-5"
