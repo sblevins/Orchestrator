@@ -1,0 +1,75 @@
+# Tracked defaults. Put private changes in config/local.toml or config/projects/<id>.toml.
+[supervisor]
+poll_seconds = 1.0
+heartbeat_seconds = 5.0
+stale_seconds = 30.0
+max_parallel = 2
+monitor_interval_seconds = 60.0
+monitor_batch_events = 50
+
+[personalization]
+name = "Stephen"
+communication_style = "Concise, neutral, practical. No pirate language. Seek independent evidence, distinguish facts from assumptions, and explain complicated points in plain English. Never automatically approve code execution or permission requests."
+
+[frontends]
+preferred = "claude"
+[frontends.claude]
+command = ["claude"]
+[frontends.pi]
+command = ["pi"]
+
+[workers]
+enabled = false
+[routing]
+enabled = false
+rules = []
+[routing.first_mate]
+
+[adapters.claude]
+command = ["claude"]
+[adapters.codex]
+command = ["codex"]
+
+[roles.orchestrator]
+adapter = "claude"
+model = "claude-sonnet-5-5"
+effort = "low"
+timeout_seconds = 300
+max_budget_usd = 5.0
+memory = "2G"
+cpus = 1
+allowed_tools = ["Read", "Glob", "Grep"]
+prompt_path = "roles/orchestrator.md"
+
+[roles.planner]
+adapter = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+timeout_seconds = 900
+max_budget_usd = 15.0
+memory = "2G"
+cpus = 1
+allowed_tools = ["Read", "Glob", "Grep"]
+prompt_path = "roles/planner.md"
+
+[roles.critic]
+adapter = "codex"
+model = "gpt-6-astra"
+effort = "high"
+timeout_seconds = 900
+max_budget_usd = 15.0
+memory = "2G"
+cpus = 1
+allowed_tools = ["Read", "Glob", "Grep"]
+prompt_path = "roles/critic.md"
+
+[roles.monitor]
+adapter = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+timeout_seconds = 300
+max_budget_usd = 5.0
+memory = "2G"
+cpus = 1
+allowed_tools = ["Read", "Glob", "Grep"]
+prompt_path = "roles/monitor.md"

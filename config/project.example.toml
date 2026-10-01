@@ -1,0 +1,13 @@
+# Copy to <home>/config/projects/<project_id>.toml and chmod 600.
+# Project IDs start with an ASCII letter/digit and contain only letters,
+# digits, underscores and hyphens (maximum 128 characters).
+# This overrides local settings only for this project.
+[roles.planner]
+timeout_seconds = 1200
+max_budget_usd = 20.0
+
+[roles.critic]
+timeout_seconds = 1200
+max_budget_usd = 20.0
+
+# Worker models and routing policies are intentionally unavailable.

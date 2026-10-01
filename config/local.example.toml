@@ -1,0 +1,17 @@
+# Copy to <home>/config/local.toml, keep private, and chmod 600.
+# Tables merge recursively. Lists replace, so [] removes all allowed tools.
+[personalization]
+name = "Stephen"
+communication_style = "Concise, neutral, practical. No pirate language. Use independent evidence and never automatically approve code execution."
+
+[frontends]
+preferred = "claude" # "pi" also supported; native Claude voice stays in Claude.
+
+# Model identifiers are passed unchanged; confirm availability with your provider.
+[roles.orchestrator]
+model = "claude-sonnet-5-5"
+effort = "low"
+
+# Adapter commands contain only the executable, not additional arguments.
+# [adapters.claude]
+# command = ["/absolute/path/to/claude"]
