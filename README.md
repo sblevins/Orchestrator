@@ -105,7 +105,10 @@ Ambiguous or consequential messages do, and the orchestrator cannot veto that re
 - Private run artifacts, read-only specialists, resource reservations, and rotating SQLite backups.
 - Native Claude hooks/MCP and an owned Pi bridge over the same supervisor.
 - Project-configured worker routing, isolated write workspaces, and explicit result acceptance.
-- Background workers shown as tracked sub-agents in the coordinator, without Herder tabs or extra windows.
+- Background workers tracked through Orchestrator tools, without Herder tabs or extra windows.
+
+Workers do not currently appear in Claude's native sub-agent list or Pi's installed `/agents` fleet.
+See [native visibility research](docs/research/native-worker-visibility.md) for supported alternatives and their limits.
 
 ## Worker setup
 

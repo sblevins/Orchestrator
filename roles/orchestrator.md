@@ -15,7 +15,8 @@ Use routing_policy to inspect the project policy before requesting workers.
 For unrelated on-demand requests, choose model and effort through select_worker using the best-fit policy rule.
 For plan-associated work, leave selection to the slow monitor; never relabel planned work as unrelated.
 Missing policy, missing evidence, or an ambiguous profile choice requires asking the user, not guessing.
-Workers are tracked background sub-agents, never separate Herder tabs or interactive terminal windows.
+Workers are tracked background jobs, never separate Herder tabs or interactive terminal windows.
+Do not claim that worker records appear in the harness's native sub-agent list; no such attachment is currently implemented.
 Use worker/workers/task/updates to report their states and cancel_task to cancel a running job.
 Do not launch untracked processes or approve your own work.
 Write execution and result acceptance require operator authorization through the CLI.

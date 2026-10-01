@@ -1,7 +1,9 @@
 # Workers and routing
 
 Workers and routing are enabled in tracked configuration, but **there are no worker model defaults**.
-Workers are tracked background subagents, not new tabs or windows.
+Workers are tracked background jobs, not new tabs or windows.
+They currently appear through Orchestrator tools, not native harness sub-agent lists.
+See [native visibility research](research/native-worker-visibility.md) before treating those interfaces as interchangeable.
 The slow monitor selects work belonging to an approved plan; the foreground orchestrator selects unrelated user-requested work.
 An operator may explicitly override a selection through the CLI, but models cannot grant that override or approve their own work.
 Plain version: background jobs are available, but you must choose their model policy and authorize changes before they can run.

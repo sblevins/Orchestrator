@@ -53,6 +53,11 @@ class NativeStartTests(unittest.TestCase):
         first = bootstrap(self.home, "pi", "native-pi", reserve=False)
         self.assertEqual(first["session"]["id"], "native-pi")
         self.assertIn("User preferences", first["instructions"])
+        self.assertIn(
+            "Request workers only through authorized Orchestrator tools", first["instructions"]
+        )
+        self.assertIn("native sub-agent view", first["instructions"])
+        self.assertNotIn("Do not start implementation workers.", first["instructions"])
         self.store.add_project("example", str(self.home))
         self.store.open_session("native-pi", "pi", "example")
         self.store.close_session("native-pi")
