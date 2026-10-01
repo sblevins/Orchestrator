@@ -1,0 +1,13 @@
+worktrees/
+data/
+config/local.toml
+config/projects/
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.coverage
+.pytest_cache/
+.ruff_cache/

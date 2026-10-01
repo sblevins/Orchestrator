@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project-orchestrator"
+version = "0.1.0"
+description = "Project-scoped coordination with durable jobs and independent review"
+requires-python = ">=3.11"
+
+[project.scripts]
+orchestrator = "orchestrator.cli:main"
+
+[tool.setuptools]
+packages = ["orchestrator"]
+
+[tool.ruff]
+line-length = 100
