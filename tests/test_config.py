@@ -124,7 +124,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(beta["effort"], "high")
 
     def test_invalid_intermediate_value_can_be_overridden(self):
-        self.write("config/local.toml", '[roles.planner]\neffort="xhigh"\n')
+        self.write("config/local.toml", '[roles.planner]\neffort="invalid"\n')
         self.write("config/projects/fixed.toml", '[roles.planner]\neffort="high"\n')
         load_config(self.home, "fixed")
         with self.assertRaises(ConfigurationError):
@@ -184,7 +184,7 @@ class ConfigurationTests(unittest.TestCase):
         bad_values = {
             "adapter": ["pi", "unknown", [], True],
             "model": ["", "  ", "a\x00", 5, True],
-            "effort": ["xhigh", "unknown", [], True],
+            "effort": ["unknown", [], True],
             "timeout_seconds": [0, -1, True, float("nan"), float("inf"), 86401, "60"],
             "max_budget_usd": [0, True, float("nan"), float("inf"), 1001, "5"],
             "memory": [2, True, "0G", "2GB", "-1G", "1G;evil", "63M", "1025G",

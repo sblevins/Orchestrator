@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS plans(
  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
  session_id TEXT NOT NULL REFERENCES sessions(id), version INTEGER NOT NULL,
  request TEXT NOT NULL, status TEXT NOT NULL, planner_task TEXT, critic_task TEXT,
- graph_json TEXT, created REAL NOT NULL, UNIQUE(project_id,version));
+ graph_json TEXT, review_round INTEGER NOT NULL DEFAULT 1, created REAL NOT NULL, UNIQUE(project_id,version));
 CREATE TABLE IF NOT EXISTS tasks(
  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
  session_id TEXT NOT NULL REFERENCES sessions(id), role TEXT NOT NULL,
@@ -451,6 +451,9 @@ class Store:
     def cancel(self, session_id: str, task_id: str) -> None:
         session = self.require_writer(session_id)
         with self.transaction() as database:
+            current_session = database.execute("SELECT active,observer FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if not current_session or not current_session[0] or current_session[1]:
+                raise StateError("Coordinator ownership changed")
             task = database.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             if not task or task["project_id"] != session["project_id"]:
                 raise StateError("Task is not in this project")
@@ -604,7 +607,7 @@ class Store:
             sessions = [dict(row) for row in database.execute("SELECT * FROM sessions WHERE project_id=? AND active=1", (project_id,))]
         tasks = [{key: value for key, value in task.items() if key not in {"prompt", "result", "token", "config"}}
                  for task in self.tasks(project_id)]
-        return {"project": project, "sessions": sessions, "plans": plans, "tasks": tasks[-100:], "holds": holds,
+        return {"project": project, "sessions": sessions, "plans": [{key: value for key, value in plan.items() if key != "graph_json"} for plan in plans], "tasks": tasks[-100:], "holds": holds,
                 "workers_enabled": False}
 
     def read_note(self, project_id: str, name: str) -> dict:
@@ -623,6 +626,9 @@ class Store:
             raise StateError("Notes must be text of at most 100 KB")
         # Serialize competing note writers with the same database lock as state mutations.
         with self.transaction() as database:
+            current_session = database.execute("SELECT active,observer FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if not current_session or not current_session[0] or current_session[1]:
+                raise StateError("Coordinator ownership changed")
             previous = self.read_note(session["project_id"], name)
             if previous["revision"] != expected_revision:
                 raise StateError("Note changed since you read it; read again before updating")
@@ -702,3 +708,29 @@ class Store:
         with self.transaction() as database:
             database.execute("DELETE FROM service WHERE key=?", (f"pause:{project_id}",))
             self._event(database, project_id, "project.resumed", {}, notify=True)
+
+    def revise_plan(self, plan_id: str, prompt: str, config: dict) -> dict | None:
+        """Bounded read-only planner/critic iteration, never implementation permission."""
+        with self.transaction() as database:
+            plan = database.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
+            if not plan or plan["status"] != "needs_revision":
+                return None
+            if plan["review_round"] >= config["planning"]["max_review_rounds"]:
+                return None
+            latest = database.execute("SELECT MAX(version) FROM plans WHERE project_id=?", (plan["project_id"],)).fetchone()[0]
+            if plan["version"] != latest:
+                return None
+            revision_id = str(uuid.uuid4())
+            database.execute("UPDATE plans SET status='superseded' WHERE id=?", (plan_id,))
+            database.execute(
+                "INSERT INTO plans(id,project_id,session_id,version,request,status,review_round,created) "
+                "VALUES(?,?,?,?,?,'drafting',?,?)",
+                (revision_id, plan["project_id"], plan["session_id"], latest + 1,
+                 plan["request"], plan["review_round"] + 1, now()))
+            task_id = self._enqueue(database, plan["project_id"], plan["session_id"], "planner",
+                                    prompt, config, plan_id=revision_id, idempotency_key=f"planner:{revision_id}")
+            database.execute("UPDATE plans SET planner_task=? WHERE id=?", (task_id, revision_id))
+            self._event(database, plan["project_id"], "plan.revision_started",
+                        {"previous_plan_id": plan_id, "plan_id": revision_id,
+                         "review_round": plan["review_round"] + 1}, plan["session_id"], notify=True)
+        return self.plan(revision_id)

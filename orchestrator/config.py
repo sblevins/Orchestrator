@@ -14,7 +14,7 @@ class ConfigurationError(ValueError):
 CORE_ROLES = ("orchestrator", "planner", "critic", "monitor")
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "default.toml"
 ADAPTER_EFFORTS = {
-    "claude": {"low", "medium", "high"},
+    "claude": {"low", "medium", "high", "xhigh", "max"},
     "codex": {"minimal", "low", "medium", "high", "xhigh"},
 }
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep"}
@@ -87,6 +87,15 @@ def validate_config(config: dict) -> None:
     _number(execution.get("max_parallel"), "execution.max_parallel", 1, 64, True)
     if execution.get("dependency_failure") not in ("block", "cancel"):
         _fail("execution.dependency_failure must be block or cancel")
+    if "monitoring" in config:
+        monitoring = _table(config, "monitoring")
+        if type(monitoring.get("review_every_prompt")) is not bool:
+            _fail("monitoring.review_every_prompt must be a boolean")
+        routine = monitoring.get("routine_prompts")
+        if (not isinstance(routine, list) or len(routine) > 100
+                or any(not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 200
+                       or prompt != prompt.lower().strip() for prompt in routine)):
+            _fail("monitoring.routine_prompts must be at most 100 normalized exact queries")
     personalization = _table(config, "personalization")
     for key in ("name", "communication_style"):
         _text(personalization.get(key), f"personalization.{key}")

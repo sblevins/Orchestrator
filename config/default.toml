@@ -17,7 +17,7 @@ max_parallel = 3
 dependency_failure = "block"
 
 [personalization]
-name = "Stephen"
+name = "User"
 communication_style = "Concise, neutral, practical. No pirate language. Seek independent evidence, distinguish facts from assumptions, and explain complicated points in plain English. Never automatically approve code execution or permission requests."
 
 [frontends]
@@ -82,3 +82,8 @@ memory = "2G"
 cpus = 1
 allowed_tools = ["Read", "Glob", "Grep"]
 prompt_path = "roles/monitor.md"
+
+# Every prompt is saved. Only exact routine queries skip starting a deep review.
+[monitoring]
+review_every_prompt = false
+routine_prompts = ["/status", "/tasks", "/progress", "status", "progress", "what's the status", "what is the status", "what's the status of work", "what is the status of work", "how is it going", "show progress", "show the current status", "list running tasks"]
