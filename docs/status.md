@@ -29,6 +29,12 @@ Pi verifies the exact model, effort, and tool allowlist without silent fallback,
 Worker tools permit reading and file edits only, not shell commands or tests.
 See [adapters](adapters.md) for execution and authentication boundaries.
 
+Role and worker models accept case-insensitive Opus, Sonnet, Haiku, and Fable family selectors alongside unchanged exact IDs.
+Claude uses native aliases; the Pi foreground selects the newest stable matching version in its loaded provider catalog without fuzzy sorting or authentication fallback.
+Task records distinguish the requested selector from reported model usage, which can include auxiliary models.
+Existing defaults and private version pins are unchanged.
+See [model families](configuration.md#model-families-or-exact-versions) for configuration and freshness limits.
+
 Frontend-specific observers add native visibility without changing worker execution ownership.
 Claude uses exactly authorized Haiku watchers; Pi uses local no-LLM observers through the installed pi-subagents public RPC.
 MCP watches are concurrent and bounded, project/session checked, and safely detached on cancellation or disconnect.
@@ -37,8 +43,9 @@ See [worker visibility](worker-visibility.md) for reattachment and installed UI 
 
 ## Validation
 
-Last verified 2026-10-01: all 272 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
+Last verified 2026-10-01: all 281 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
 The suite includes real CLI worker selection/approval/acceptance, monitor-owned planned dispatch, dependency gating, signed isolated write results, and local Pi SDK tests against a loopback-only fake provider.
+Family tests cover a real CLI-to-worker run with a fake harness, installed Pi startup, numeric ordering, exact-pin preservation, provider boundaries, reload behavior, and fenced model-usage records.
 The subprocess lifecycle tests also passed three consecutive runs after correcting a cleanup lock race.
 Ruff lint/format, Node syntax, and `git diff --check` passed.
 Independent review findings were reproduced and fixed: stale dependency reads, oversized valid plan seeding, and cancellation during final launch preparation.
