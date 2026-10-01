@@ -71,6 +71,5 @@ Quota-dependent policy must wait for supported evidence or an explicit operator 
 
 ## In flight
 
-The `feature/native-worker-visibility` worktree contains the observer implementation and passing offline tests, awaiting final integration.
-No open pull requests were found in the current repository evidence.
+No unfinished implementation worktree or open pull request remains in the current repository evidence.
 Live provider and interactive acceptance checks remain pending as listed above.
