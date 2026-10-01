@@ -1,6 +1,6 @@
 # Specialist subprocess adapters
 
-`orchestrator.adapters.build_command(config, role, prompt, cwd, output_path, session_id=None)` returns an argv list, without launching a process or writing a file.
+`orchestrator.adapters.build_command(config, role, prompt, cwd, output_path, session_id=None, *, project_root=None, stdin_prompt=False)` returns an argv list, without launching a process or writing a file.
 It validates configuration through `role_config` and raises `AdapterError` on invalid configuration or arguments.
 Runtime appends the role instructions to the prompt before calling it.
 `session_id` means resume that harness conversation, never select the latest conversation or invent a supervisor ID.
@@ -27,15 +27,16 @@ Plain version: Claude can use only the configured reading tools, cannot ask for 
 Codex receives `-a never exec -s read-only -C CWD -m MODEL -c 'model_reasoning_effort="EFFORT"' --json --output-last-message PATH -- PROMPT`.
 The effort value is encoded with `json.dumps` after config validation, producing a quoted TOML-compatible string rather than executable text.
 Resumes retain the outer execution policy and use `exec ... resume --json --output-last-message PATH -- ID PROMPT`.
-The prompt is one literal argument even when it starts with a dash, contains quotes, or contains shell syntax.
-A prompt equal to `-` is rejected because Codex treats it as stdin even after `--`.
-Runtime must close stdin to avoid Codex appending unintended input.
+The positional API remains available for small test calls and rejects a literal `-` prompt.
+Production runtime sets `stdin_prompt=True`: Claude reads the private prompt file from stdin, and Codex receives the explicit `-` stdin sentinel.
+This avoids argument-size limits for large monitor batches.
+Codex also receives `--ignore-user-config --ignore-rules` so inherited integrations do not widen the specialist role.
 Plain version: prompt text is sent as text, not run as a shell command.
 
 Codex has no equivalent to Claude's `Read,Glob,Grep` tool allowlist.
 Its read-only sandbox can run shell-based inspection; `allowed_tools` does not disable individual Codex tools or shell commands.
-Inherited MCP servers, hooks, configuration, credentials, and network capabilities require runtime environment isolation and operator policy review.
-This builder does not silently ignore user safety rules or claim that filesystem sandboxing confines external services.
+User configuration and rules are deliberately excluded from specialists; the project-specific role contract and operator-managed policies define their authority.
+Authentication environment and administrator policy still apply, and filesystem sandboxing alone does not confine every external service.
 Codex has no supported dollar-cap flag here: `max_budget_usd` is not enforced for Codex, and token counts are not converted into an invented price.
 Runtime must expose that limitation, and must refuse Codex dispatch if its policy requires an enforceable dollar cap or a Claude-equivalent tool allowlist.
 Plain version: Codex is told not to write project files, but that does not limit every outside service or guarantee a spending limit.
@@ -56,7 +57,7 @@ Otherwise `result` must be a nonempty string.
 The consumer still validates the graph or review application schema; this parser does not interpret approval from prose.
 Claude's `total_cost_usd` is optional, finite, numeric, nonnegative, and never a boolean or string.
 Missing/null cost remains `None`, not zero.
-Resumed totals may include earlier spending, so runtime must calculate deltas rather than summing conversation totals blindly.
+Resumed cost scope is not yet verified; the runtime stores the reported value and does not aggregate it as verified per-turn spending.
 Plain version: use the checked structured answer when provided, and leave unknown costs unknown.
 
 Codex requires a `thread.started` ID, a completed `agent_message` with text, and a later `turn.completed`.
@@ -69,9 +70,9 @@ Plain version: take Codex's final finished answer, not an earlier update or a le
 
 ## Runtime responsibilities
 
-Runtime owns subprocess creation with `shell=False`, explicit cwd and an isolated environment, bounded stdout/stderr capture, private output paths, and resource reservations.
+Runtime owns subprocess creation with `shell=False`, explicit cwd and a child-marked environment, bounded stdout/stderr capture, private output paths, and resource reservations.
 It must remove inherited nested-session markers and model/effort overrides without leaking credentials into logs, and isolate unsafe inherited harness integrations.
-Prompts passed through argv may be visible to local process inspection; do not insert secrets unnecessarily.
+Production prompts use private stdin files rather than argv; sensitive prompts still remain in owner-readable local artifacts.
 Neither builder nor parser changes process-global environment variables.
 
 Runtime also owns deadlines, cancellation, process groups, termination escalation, reaping children, lease fencing, and persistence.

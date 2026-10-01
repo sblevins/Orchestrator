@@ -11,3 +11,5 @@ dist/
 .coverage
 .pytest_cache/
 .ruff_cache/
+
+config/workflows/

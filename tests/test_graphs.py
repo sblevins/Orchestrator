@@ -1,32 +1,55 @@
 """Graph validation and scheduling tests require only the standard library."""
 
-from copy import deepcopy
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from copy import deepcopy
+from pathlib import Path
 from unittest.mock import patch
 
 from orchestrator.graphs import (
-    GraphError, MAX_ITEMS, MAX_NODES, MAX_TEXT, MAX_WORKFLOW_BYTES, STATES,
-    load_workflow, planning_schema, ready_nodes, validate_plan,
+    MAX_ITEMS,
+    MAX_NODES,
+    MAX_TEXT,
+    MAX_WORKFLOW_BYTES,
+    STATES,
+    GraphError,
+    load_workflow,
+    planning_schema,
+    ready_nodes,
+    validate_plan,
 )
 
 
 def node(identifier, dependencies=(), kind="work"):
-    return {"id": identifier, "title": identifier, "description": "Do this task.",
-            "depends_on": list(dependencies), "acceptance_criteria": ["Verified."], "kind": kind}
+    return {
+        "id": identifier,
+        "title": identifier,
+        "description": "Do this task.",
+        "depends_on": list(dependencies),
+        "acceptance_criteria": ["Verified."],
+        "kind": kind,
+    }
 
 
 def plan(*nodes):
-    return {"summary": "A plan", "assumptions": [], "risks": [], "questions": [],
-            "nodes": list(nodes) or [node("root")]}
+    return {
+        "summary": "A plan",
+        "assumptions": [],
+        "risks": [],
+        "questions": [],
+        "nodes": list(nodes) or [node("root")],
+    }
 
 
 def diamond():
-    return plan(node("root"), node("left", ["root"]), node("right", ["root"]),
-                node("join", ["left", "right"]))
+    return plan(
+        node("root"),
+        node("left", ["root"]),
+        node("right", ["root"]),
+        node("join", ["left", "right"]),
+    )
 
 
 class ValidationTests(unittest.TestCase):
@@ -41,10 +64,14 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(source, original)
 
     def test_duplicates_missing_dependencies_and_cycles(self):
-        invalid = [plan(node("a"), node("a")), plan(node("a", ["missing"])),
-                   plan(node("a", ["a"])), plan(node("a", ["b"]), node("b", ["a"])),
-                   plan(node("a"), node("b", ["a", "a"])),
-                   plan(node("a"), node("b", ["c"]), node("c", ["b"]))]
+        invalid = [
+            plan(node("a"), node("a")),
+            plan(node("a", ["missing"])),
+            plan(node("a", ["a"])),
+            plan(node("a", ["b"]), node("b", ["a"])),
+            plan(node("a"), node("b", ["a", "a"])),
+            plan(node("a"), node("b", ["c"]), node("c", ["b"])),
+        ]
         for value in invalid:
             with self.subTest(value=value), self.assertRaises(GraphError):
                 validate_plan(value)
@@ -73,8 +100,16 @@ class ValidationTests(unittest.TestCase):
             "description": [None, 1, "", "\t", "a" * (MAX_TEXT + 1)],
             "kind": [None, True, [], "critic", "worker"],
             "depends_on": [None, (), "root", [1], [[]], ["bad/path"], ["x"] * MAX_NODES],
-            "acceptance_criteria": [None, (), "test", [], [True], [""], ["\x00"],
-                                    ["a"] * (MAX_ITEMS + 1)],
+            "acceptance_criteria": [
+                None,
+                (),
+                "test",
+                [],
+                [True],
+                [""],
+                ["\x00"],
+                ["a"] * (MAX_ITEMS + 1),
+            ],
         }
         for field, values in cases.items():
             for value in values:
@@ -83,8 +118,11 @@ class ValidationTests(unittest.TestCase):
                 with self.subTest(field=field, value=value), self.assertRaises(GraphError):
                     validate_plan(invalid)
         for field in ("summary", "assumptions", "risks", "questions", "nodes"):
-            values = ([None, [], True, "", "\n", "\x00", "a" * (MAX_TEXT + 1)]
-                      if field == "summary" else [None, (), True, "a"])
+            values = (
+                [None, [], True, "", "\n", "\x00", "a" * (MAX_TEXT + 1)]
+                if field == "summary"
+                else [None, (), True, "a"]
+            )
             if field == "nodes":
                 values += [[], [None], [node(str(index)) for index in range(MAX_NODES + 1)]]
             elif field != "summary":
@@ -96,8 +134,9 @@ class ValidationTests(unittest.TestCase):
                     validate_plan(invalid)
 
     def test_boundaries_and_large_chain_without_recursion(self):
-        source = plan(*(node(str(index), [str(index - 1)] if index else [])
-                        for index in range(MAX_NODES)))
+        source = plan(
+            *(node(str(index), [str(index - 1)] if index else []) for index in range(MAX_NODES))
+        )
         source["summary"] = "a" * MAX_TEXT
         source["nodes"][0]["title"] = "a" * 256
         source["assumptions"] = ["a" * MAX_TEXT] * MAX_ITEMS
@@ -120,10 +159,15 @@ class ValidationTests(unittest.TestCase):
 class ReadinessTests(unittest.TestCase):
     def test_diamond_fan_out_and_join(self):
         source = diamond()
-        self.assertEqual(ready_nodes(source, {}), {
-            "ready": ["root"], "waiting": ["left", "right", "join"],
-            "blocked": [], "cancelled": [],
-        })
+        self.assertEqual(
+            ready_nodes(source, {}),
+            {
+                "ready": ["root"],
+                "waiting": ["left", "right", "join"],
+                "blocked": [],
+                "cancelled": [],
+            },
+        )
         states = {"root": "completed"}
         self.assertEqual(ready_nodes(source, states)["ready"], ["left", "right"])
         states["left"] = "succeeded"
@@ -135,13 +179,15 @@ class ReadinessTests(unittest.TestCase):
         self.assertTrue(all(not value for value in ready_nodes(source, states).values()))
 
     def test_out_of_order_nodes_and_deterministic_ties(self):
-        source = plan(node("join", ["z", "a"]), node("z", ["root"]),
-                      node("a", ["root"]), node("root"))
+        source = plan(
+            node("join", ["z", "a"]), node("z", ["root"]), node("a", ["root"]), node("root")
+        )
         for _ in range(5):
             self.assertEqual(ready_nodes(source, {"root": "completed"})["ready"], ["z", "a"])
         self.assertEqual(ready_nodes(source, {"root": "failed"})["blocked"], ["z", "a", "join"])
-        self.assertEqual([item["id"] for item in validate_plan(source)["nodes"]],
-                         ["join", "z", "a", "root"])
+        self.assertEqual(
+            [item["id"] for item in validate_plan(source)["nodes"]], ["join", "z", "a", "root"]
+        )
 
     def test_capacity_counts_running_and_never_releases_selected_dependencies(self):
         source = plan(node("a"), node("b"), node("c"), node("d", ["a"]))
@@ -160,7 +206,7 @@ class ReadinessTests(unittest.TestCase):
             for failure in ("failed", "cancelled", "blocked"):
                 with self.subTest(policy=policy, failure=failure):
                     result = ready_nodes(diamond(), {"root": failure}, dependency_failure=policy)
-                    self.assertTrue(set(["left", "right", "join"]).issubset(result[output]))
+                    self.assertTrue({"left", "right", "join"}.issubset(result[output]))
                     self.assertEqual(result["ready"], [])
                     self.assertEqual(result["waiting"], [])
         source = plan(*diamond()["nodes"], node("independent"))
@@ -181,8 +227,9 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(ready_nodes(source, {"approve": "approved"})["ready"], ["after"])
 
     def test_approval_and_completed_states_cannot_skip_dependencies(self):
-        source = plan(node("before"), node("approve", ["before"], "approval"),
-                      node("after", ["approve"]))
+        source = plan(
+            node("before"), node("approve", ["before"], "approval"), node("after", ["approve"])
+        )
         result = ready_nodes(source, {"approve": "approved"})
         self.assertEqual(result["ready"], ["before"])
         self.assertEqual(result["waiting"], ["approve", "after"])
@@ -204,8 +251,16 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual((source, states), original)
 
     def test_invalid_state_keys_values_and_scheduler_options(self):
-        for states in (None, [], {"missing": "completed"}, {1: "completed"},
-                       {"root": []}, {"root": True}, {"root": "typo"}, {"root": None}):
+        for states in (
+            None,
+            [],
+            {"missing": "completed"},
+            {1: "completed"},
+            {"root": []},
+            {"root": True},
+            {"root": "typo"},
+            {"root": None},
+        ):
             with self.subTest(states=states), self.assertRaises(GraphError):
                 ready_nodes(diamond(), states)
         for maximum in (True, 0, -1, 65, 1.5, "3", None):
@@ -242,8 +297,10 @@ class WorkflowTests(unittest.TestCase):
             states["approval"] = "approved"
             self.assertTrue(all(not values for values in ready_nodes(source, states).values()))
         source = load_workflow(self.home, "research-review")
-        self.assertEqual(ready_nodes(source, {"research": "completed"})["ready"],
-                         ["evidence-review", "risk-review"])
+        self.assertEqual(
+            ready_nodes(source, {"research": "completed"})["ready"],
+            ["evidence-review", "risk-review"],
+        )
 
     def test_custom_template_and_full_override(self):
         custom = diamond()
@@ -251,8 +308,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(load_workflow(self.home, "custom"), custom)
         self.write("plan-review", custom)
         self.assertEqual(load_workflow(self.home, "plan-review"), custom)
-        self.assertEqual(ready_nodes(load_workflow(self.home, "plan-review"),
-                                     {"root": "completed"})["ready"], ["left", "right"])
+        self.assertEqual(
+            ready_nodes(load_workflow(self.home, "plan-review"), {"root": "completed"})["ready"],
+            ["left", "right"],
+        )
         with tempfile.TemporaryDirectory() as other:
             self.assertNotEqual(load_workflow(Path(other), "plan-review"), custom)
 
@@ -262,8 +321,23 @@ class WorkflowTests(unittest.TestCase):
             load_workflow(self.home, "plan-review")
 
     def test_path_traversal_and_invalid_names(self):
-        for name in ("../escape", "/tmp/escape", "a/b", "a\\b", ".", "..", "a.json", "",
-                     "a\n", "a\x00", "é", "a" * 129, None, [], True):
+        for name in (
+            "../escape",
+            "/tmp/escape",
+            "a/b",
+            "a\\b",
+            ".",
+            "..",
+            "a.json",
+            "",
+            "a\n",
+            "a\x00",
+            "é",
+            "a" * 129,
+            None,
+            [],
+            True,
+        ):
             with self.subTest(name=name), self.assertRaises(GraphError):
                 load_workflow(self.home, name)
 
@@ -292,14 +366,21 @@ class WorkflowTests(unittest.TestCase):
         directory = self.home / "tracked"
         directory.mkdir()
         (directory / "custom.json").symlink_to(self.write("other", plan()))
-        with patch("orchestrator.graphs.WORKFLOW_DIRECTORY", directory):
-            with self.assertRaises(GraphError):
-                load_workflow(self.home, "custom")
+        with (
+            patch("orchestrator.graphs.WORKFLOW_DIRECTORY", directory),
+            self.assertRaises(GraphError),
+        ):
+            load_workflow(self.home, "custom")
 
     def test_bad_json_encoding_duplicate_keys_and_oversized_files(self):
         target = self.write("plan-review", plan())
-        for content in (b"{", b"\xff", b'{"summary":"a","summary":"b"}',
-                        b"[" * 2000, b"x" * (MAX_WORKFLOW_BYTES + 1)):
+        for content in (
+            b"{",
+            b"\xff",
+            b'{"summary":"a","summary":"b"}',
+            b"[" * 2000,
+            b"x" * (MAX_WORKFLOW_BYTES + 1),
+        ):
             target.write_bytes(content)
             with self.subTest(content=content[:20]), self.assertRaises(GraphError):
                 load_workflow(self.home, "plan-review")

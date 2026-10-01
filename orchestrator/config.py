@@ -1,10 +1,10 @@
 """Validated, layered configuration for the local supervisor."""
 
-from copy import deepcopy
 import math
-from pathlib import Path
 import re
 import tomllib
+from copy import deepcopy
+from pathlib import Path
 
 
 class ConfigurationError(ValueError):
@@ -42,8 +42,10 @@ def _text(value, context):
 def _number(value, context, minimum, maximum, integer=False):
     types = (int,) if integer else (int, float)
     if type(value) not in types or not minimum <= value <= maximum:
-        _fail(f"{context} must be {'an integer' if integer else 'a number'} "
-              f"between {minimum} and {maximum}")
+        _fail(
+            f"{context} must be {'an integer' if integer else 'a number'} "
+            f"between {minimum} and {maximum}"
+        )
     if not math.isfinite(value):
         _fail(f"{context} must be finite")
 
@@ -67,21 +69,23 @@ def validate_config(config: dict) -> None:
     if not isinstance(config, dict):
         _fail("config must be a table")
     supervisor = _table(config, "supervisor")
-    for key in ("poll_seconds", "heartbeat_seconds", "stale_seconds",
-                "monitor_interval_seconds"):
+    for key in ("poll_seconds", "heartbeat_seconds", "stale_seconds", "monitor_interval_seconds"):
         _number(supervisor.get(key), f"supervisor.{key}", 0.1, 86400)
     if supervisor["stale_seconds"] <= supervisor["heartbeat_seconds"]:
         _fail("supervisor.stale_seconds must exceed heartbeat_seconds")
     _number(supervisor.get("max_parallel"), "supervisor.max_parallel", 1, 64, True)
-    _number(supervisor.get("monitor_batch_events"),
-            "supervisor.monitor_batch_events", 1, 10000, True)
+    _number(
+        supervisor.get("monitor_batch_events"), "supervisor.monitor_batch_events", 1, 10000, True
+    )
     planning = _table(config, "planning")
     if planning.get("structure") != "graph":
         _fail("planning.structure must be graph")
     workflow = planning.get("workflow")
     if not isinstance(workflow, str) or not SAFE_IDENTIFIER.fullmatch(workflow):
-        _fail("planning.workflow must be a safe identifier: 1-128 ASCII letters, digits, "
-              "underscores or hyphens, beginning with a letter or digit")
+        _fail(
+            "planning.workflow must be a safe identifier: 1-128 ASCII letters, digits, "
+            "underscores or hyphens, beginning with a letter or digit"
+        )
     _number(planning.get("max_review_rounds"), "planning.max_review_rounds", 1, 100, True)
     execution = _table(config, "execution")
     _number(execution.get("max_parallel"), "execution.max_parallel", 1, 64, True)
@@ -92,9 +96,17 @@ def validate_config(config: dict) -> None:
         if type(monitoring.get("review_every_prompt")) is not bool:
             _fail("monitoring.review_every_prompt must be a boolean")
         routine = monitoring.get("routine_prompts")
-        if (not isinstance(routine, list) or len(routine) > 100
-                or any(not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 200
-                       or prompt != prompt.lower().strip() for prompt in routine)):
+        if (
+            not isinstance(routine, list)
+            or len(routine) > 100
+            or any(
+                not isinstance(prompt, str)
+                or not prompt.strip()
+                or len(prompt) > 200
+                or prompt != prompt.lower().strip()
+                for prompt in routine
+            )
+        ):
             _fail("monitoring.routine_prompts must be at most 100 normalized exact queries")
     personalization = _table(config, "personalization")
     for key in ("name", "communication_style"):
@@ -103,9 +115,12 @@ def validate_config(config: dict) -> None:
     if workers.get("enabled") is not False or set(workers) != {"enabled"}:
         _fail("workers must contain only enabled=false; workers are not implemented")
     routing = _table(config, "routing")
-    if (routing.get("enabled") is not False or routing.get("rules") != []
-            or not isinstance(routing.get("rules"), list)
-            or set(routing) - {"enabled", "rules", "first_mate"}):
+    if (
+        routing.get("enabled") is not False
+        or routing.get("rules") != []
+        or not isinstance(routing.get("rules"), list)
+        or set(routing) - {"enabled", "rules", "first_mate"}
+    ):
         _fail("routing must remain disabled with empty rules and no worker defaults")
     if "first_mate" in routing and routing["first_mate"] != {}:
         _fail("routing.first_mate must be an empty policy table until routing exists")
@@ -137,10 +152,16 @@ def validate_config(config: dict) -> None:
         if not 64 <= megabytes <= 1048576:
             _fail(f"roles.{name}.memory must be between 64M and 1024G")
         tools = role.get("allowed_tools")
-        if (not isinstance(tools, list)
-                or any(not isinstance(tool, str) or tool not in READ_ONLY_TOOLS for tool in tools)
-                or len(tools) != len(set(tools))):
+        if (
+            not isinstance(tools, list)
+            or any(not isinstance(tool, str) or tool not in READ_ONLY_TOOLS for tool in tools)
+            or len(tools) != len(set(tools))
+        ):
             _fail(f"roles.{name}.allowed_tools must be unique read-only Read/Glob/Grep tools")
+        if name != "orchestrator" and adapter == "codex" and set(tools) != READ_ONLY_TOOLS:
+            _fail(
+                f"roles.{name}: Codex supports the full read-only sandbox, not per-tool restrictions"
+            )
         if "prompt_path" in role and role["prompt_path"] != f"roles/{name}.md":
             _fail(f"roles.{name}.prompt_path must be roles/{name}.md")
     if "frontends" in config:
@@ -188,8 +209,10 @@ def load_config(home: Path, project_id: str | None = None) -> dict:
         if project_id is not None and (
             not isinstance(project_id, str) or not PROJECT_ID.fullmatch(project_id)
         ):
-            _fail("project_id must be 1-128 ASCII letters, digits, underscores or hyphens; "
-                  "the first character must be a letter or digit")
+            _fail(
+                "project_id must be 1-128 ASCII letters, digits, underscores or hyphens; "
+                "the first character must be a letter or digit"
+            )
         config = _read(DEFAULT_CONFIG)
         config = _merge(config, _read(_private_path(home, "config/local.toml"), optional=True))
         if project_id is not None:

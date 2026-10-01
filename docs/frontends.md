@@ -45,13 +45,17 @@ After that window, use status or another turn to check pending events and start 
 `start --frontend claude --channels` explicitly opts into research-preview MCP channels and the development-channel confirmation prompt.
 Ordinary MCP registration does not authorize channels; authentication and organization policy still apply.
 The default does not request preview channels.
-Pi polls updates through argv-based CLI calls, sends each new event ID as a follow-up turn, and stops polling when the session shuts down or reloads.
+Pi polls updates through CLI calls using private payload files, sends each new event ID as a follow-up turn, and stops polling when the session shuts down or reloads.
 Reload reconstructs delivered event IDs from the active conversation branch to avoid repeated model turns.
 Delivery is not acknowledgment: both frontends retain pending events until explicit acknowledgment after handling findings.
 Plain version: seeing a message does not mark the problem as solved.
 
 ## Private data and authority
 
+The launcher generates owner-only hook settings with absolute installed paths, so a separate private home does not break hooks.
+It loads user settings plus its generated settings, excluding project/local settings to avoid registering the repository hooks twice.
+Both frontends receive the configured orchestrator role and personalization through a private prompt file.
+Configured read tools are translated into the native frontend allowlist; native worker and file-edit tools are not included.
 Generated Claude MCP settings live at `data/frontend/<session-id>.mcp.json` with owner-only permissions and an absolute CLI path.
 The generated server receives the launcher-owned session ID rather than a model-supplied identity.
 Notes and worker output are untrusted task data, not permission to change scope or approve work.
@@ -62,3 +66,9 @@ The shared API validates project ownership and mutation permissions.
 Run `python3 -m unittest discover -s tests -p 'test_frontends.py'` and the equivalent command for `test_hooks.py`.
 These tests make no paid calls and cover command construction, hook JSON, takeover safety, prompt delegation, quiet status replies, continuation guards, and disconnect behavior.
 Live voice, idle wakeup, preview-channel eligibility, in-session effective model selection, and permission-dialog delivery remain manual integration checks.
+
+Native Claude `/clear` preserves the durable instance while changing the native conversation ID.
+Resume uses the recorded native ID without changing the project binding.
+Claude may preserve its initial system-prompt snapshot on resume; start a new instance to apply changed role instructions reliably.
+For project-specific orchestrator model/preferences, select `--project ID` at launch.
+Binding a project later does not hot-swap an already running frontend model.

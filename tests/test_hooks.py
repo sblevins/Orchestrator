@@ -1,9 +1,9 @@
 import os
-from pathlib import Path
 import sys
 import tempfile
-from types import ModuleType
 import unittest
+from pathlib import Path
+from types import ModuleType
 from unittest.mock import Mock, patch
 
 from orchestrator.hooks import handle_hook
@@ -48,16 +48,32 @@ class HookTests(unittest.TestCase):
         prompt = "oversized " * 10000
         with patch.dict(sys.modules, {"orchestrator.api": api}):
             self.hook("UserPromptSubmit", prompt=prompt)
-            api.request.assert_called_once_with(self.home, "frontend", "record_prompt", {"prompt": prompt})
+            api.request.assert_called_once_with(
+                self.home, "frontend", "record_prompt", {"prompt": prompt}
+            )
             self.store.open_session("unbound", "claude")
-            handle_hook(self.home, "UserPromptSubmit", {"session_id": "unbound", "prompt": "/status"})
+            handle_hook(
+                self.home, "UserPromptSubmit", {"session_id": "unbound", "prompt": "/status"}
+            )
             self.assertEqual(api.request.call_count, 2)
 
     def test_readonly_and_own_tools_do_not_trigger_monitor(self):
         before = self.store.events("project")
-        for name in ["Read", "Grep", "mcp__orchestrator__status", "mcp__orchestrator__acknowledge", "mcp__orchestrator__request"]:
+        for name in [
+            "Read",
+            "Grep",
+            "mcp__orchestrator__status",
+            "mcp__orchestrator__acknowledge",
+            "mcp__orchestrator__request",
+        ]:
             self.hook("PostToolUse", tool_name=name, tool_input={"action": "updates"})
-        self.hook("PostToolUse", tool_name="Bash", tool_input={"command": "/repo/bin/orchestrator request --session frontend --action status --payload '{}'"})
+        self.hook(
+            "PostToolUse",
+            tool_name="Bash",
+            tool_input={
+                "command": "/repo/bin/orchestrator request --session frontend --action status --payload '{}'"
+            },
+        )
         self.assertEqual(before, self.store.events("project"))
         self.hook("PostToolUseFailure", tool_name="Bash", tool_input={"command": "x" * 50000})
         event = self.store.events("project")[-1]
@@ -79,7 +95,9 @@ class HookTests(unittest.TestCase):
 
     def test_pending_context_guard_and_no_implicit_ack(self):
         with self.store.transaction() as database:
-            event_id = self.store._event(database, "project", "monitor.findings", {"findings": []}, "frontend", notify=True)
+            event_id = self.store._event(
+                database, "project", "monitor.findings", {"findings": []}, "frontend", notify=True
+            )
         output = self.hook("Stop")
         self.assertEqual(output["hookSpecificOutput"]["hookEventName"], "Stop")
         self.assertLessEqual(len(output["hookSpecificOutput"]["additionalContext"]), 9000)

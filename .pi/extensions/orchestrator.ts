@@ -2,6 +2,8 @@ import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 
 /** Local bridge only. The Python service owns scheduling and durable acknowledgments. */
 export default function (pi: ExtensionAPI) {
@@ -15,12 +17,20 @@ export default function (pi: ExtensionAPI) {
 
   async function request(action: string, payload: Record<string, unknown> = {}, signal?: AbortSignal) {
     if (!sessionId || !home) throw new Error("Start this frontend with bin/orchestrator start --frontend pi");
-    const result = await pi.exec(binary, ["--home", home, "request", "--session", sessionId,
-      "--action", action, "--payload", JSON.stringify(payload)], { timeout: 5000, signal });
-    if (result.code !== 0 || result.killed) throw new Error(result.stderr || result.stdout || "Orchestrator request failed");
-    const data = JSON.parse(result.stdout);
-    if (data.error) throw new Error(String(data.error));
-    return data;
+    // pi.exec has no stdin option. Keep full prompts out of argv and process listings.
+    const requestDirectory = await mkdtemp(resolve(tmpdir(), "orchestrator-request-"));
+    try {
+      const payloadPath = resolve(requestDirectory, "payload.json");
+      await writeFile(payloadPath, JSON.stringify(payload), { mode: 0o600, flag: "wx" });
+      const result = await pi.exec(binary, ["--home", home, "request", "--session", sessionId,
+        "--action", action, "--payload-file", payloadPath], { timeout: 5000, signal });
+      if (result.code !== 0 || result.killed) throw new Error(result.stderr || result.stdout || "Orchestrator request failed");
+      const data = JSON.parse(result.stdout);
+      if (data.error) throw new Error(String(data.error));
+      return data;
+    } finally {
+      await rm(requestDirectory, { recursive: true, force: true });
+    }
   }
 
   async function poll(ctx: ExtensionContext, version: number) {

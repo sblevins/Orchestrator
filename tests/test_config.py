@@ -1,13 +1,17 @@
 """Configuration tests use private temporary homes and no external harnesses."""
 
-from copy import deepcopy
-from pathlib import Path
 import tempfile
 import unittest
+from copy import deepcopy
+from pathlib import Path
 from unittest.mock import patch
 
 from orchestrator.config import (
-    ConfigurationError, DEFAULT_CONFIG, load_config, role_config, validate_config,
+    DEFAULT_CONFIG,
+    ConfigurationError,
+    load_config,
+    role_config,
+    validate_config,
 )
 
 
@@ -37,23 +41,38 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(tuple(role[key] for key in ("adapter", "model", "effort")), values)
         self.assertEqual(self.defaults["frontends"]["preferred"], "claude")
         self.assertEqual(self.defaults["workers"], {"enabled": False})
-        self.assertEqual(self.defaults["routing"],
-                         {"enabled": False, "rules": [], "first_mate": {}})
+        self.assertEqual(
+            self.defaults["routing"], {"enabled": False, "rules": [], "first_mate": {}}
+        )
 
     def test_graph_and_execution_defaults(self):
-        self.assertEqual(self.defaults["planning"], {
-            "structure": "graph", "workflow": "plan-review", "max_review_rounds": 3,
-        })
-        self.assertEqual(self.defaults["execution"], {
-            "max_parallel": 3, "dependency_failure": "block",
-        })
+        self.assertEqual(
+            self.defaults["planning"],
+            {
+                "structure": "graph",
+                "workflow": "plan-review",
+                "max_review_rounds": 3,
+            },
+        )
+        self.assertEqual(
+            self.defaults["execution"],
+            {
+                "max_parallel": 3,
+                "dependency_failure": "block",
+            },
+        )
 
     def test_custom_workflow_and_execution_overrides(self):
-        self.write("config/local.toml", '[planning]\nworkflow="custom-review_2"\n'
-                   'max_review_rounds=5\n[execution]\nmax_parallel=4\n'
-                   'dependency_failure="cancel"\n')
-        self.write("config/projects/alpha.toml", '[planning]\nworkflow="project-review"\n'
-                   '[execution]\nmax_parallel=2\n')
+        self.write(
+            "config/local.toml",
+            '[planning]\nworkflow="custom-review_2"\n'
+            "max_review_rounds=5\n[execution]\nmax_parallel=4\n"
+            'dependency_failure="cancel"\n',
+        )
+        self.write(
+            "config/projects/alpha.toml",
+            '[planning]\nworkflow="project-review"\n[execution]\nmax_parallel=2\n',
+        )
         local = load_config(self.home)
         project = load_config(self.home, "alpha")
         self.assertEqual(local["planning"]["workflow"], "custom-review_2")
@@ -68,12 +87,44 @@ class ConfigurationTests(unittest.TestCase):
     def test_invalid_planning_and_execution_settings(self):
         cases = {
             ("planning", "structure"): [None, "list", "", [], True],
-            ("planning", "workflow"): [None, "", "../escape", "/tmp/escape", "a/b", "a\\\\b",
-                                       "a.json", "a\n", "a\x00", "é", "a" * 129, True, 1, []],
-            ("planning", "max_review_rounds"): [None, True, 0, -1, 101, 1.5, "3",
-                                                float("nan"), float("inf")],
-            ("execution", "max_parallel"): [None, True, 0, -1, 65, 1.5, "3",
-                                             float("nan"), float("inf")],
+            ("planning", "workflow"): [
+                None,
+                "",
+                "../escape",
+                "/tmp/escape",
+                "a/b",
+                "a\\\\b",
+                "a.json",
+                "a\n",
+                "a\x00",
+                "é",
+                "a" * 129,
+                True,
+                1,
+                [],
+            ],
+            ("planning", "max_review_rounds"): [
+                None,
+                True,
+                0,
+                -1,
+                101,
+                1.5,
+                "3",
+                float("nan"),
+                float("inf"),
+            ],
+            ("execution", "max_parallel"): [
+                None,
+                True,
+                0,
+                -1,
+                65,
+                1.5,
+                "3",
+                float("nan"),
+                float("inf"),
+            ],
             ("execution", "dependency_failure"): [None, "ignore", "continue", "", [], True],
         }
         for (section, key), values in cases.items():
@@ -85,9 +136,8 @@ class ConfigurationTests(unittest.TestCase):
                         validate_config(config)
             config = deepcopy(self.defaults)
             del config[section][key]
-            with self.subTest(section=section, missing=key):
-                with self.assertRaises(ConfigurationError):
-                    validate_config(config)
+            with self.subTest(section=section, missing=key), self.assertRaises(ConfigurationError):
+                validate_config(config)
 
     def test_planning_execution_boundaries(self):
         for rounds, parallel, workflow in ((1, 1, "a"), (100, 64, "A" * 128)):
@@ -102,18 +152,26 @@ class ConfigurationTests(unittest.TestCase):
             executable = f"/private/tools/{name}-launcher"
             config["frontends"][name]["command"] = [executable]
             validate_config(config)
-            for command in ([executable, "--flag"], [executable, "--dangerously-skip-permissions"],
-                            executable, []):
+            for command in (
+                [executable, "--flag"],
+                [executable, "--dangerously-skip-permissions"],
+                executable,
+                [],
+            ):
                 with self.subTest(frontend=name, command=command):
                     config["frontends"][name]["command"] = command
                     with self.assertRaises(ConfigurationError):
                         validate_config(config)
 
     def test_layer_order_and_project_isolation(self):
-        self.write("config/local.toml", '[roles.planner]\nmodel="future-model"\n'
-                   'allowed_tools=["Read"]\ntimeout_seconds=400\n')
-        self.write("config/projects/alpha.toml", '[roles.planner]\n'
-                   'model="project-model"\nallowed_tools=[]\n')
+        self.write(
+            "config/local.toml",
+            '[roles.planner]\nmodel="future-model"\nallowed_tools=["Read"]\ntimeout_seconds=400\n',
+        )
+        self.write(
+            "config/projects/alpha.toml",
+            '[roles.planner]\nmodel="project-model"\nallowed_tools=[]\n',
+        )
         alpha = load_config(self.home, "alpha")["roles"]["planner"]
         beta = load_config(self.home, "beta")["roles"]["planner"]
         self.assertEqual(alpha["model"], "project-model")
@@ -131,8 +189,11 @@ class ConfigurationTests(unittest.TestCase):
             load_config(self.home)
 
     def test_future_models_and_pi_frontend(self):
-        self.write("config/local.toml", '[roles.critic]\nmodel="future-vendor/model-99"\n'
-                   'effort="xhigh"\n[frontends]\npreferred="pi"\n')
+        self.write(
+            "config/local.toml",
+            '[roles.critic]\nmodel="future-vendor/model-99"\n'
+            'effort="xhigh"\n[frontends]\npreferred="pi"\n',
+        )
         config = load_config(self.home)
         self.assertEqual(config["roles"]["critic"]["model"], "future-vendor/model-99")
         self.assertEqual(config["frontends"]["preferred"], "pi")
@@ -140,15 +201,31 @@ class ConfigurationTests(unittest.TestCase):
     def test_role_copy_is_independent(self):
         role = role_config(self.defaults, "planner")
         role["allowed_tools"].clear()
-        self.assertEqual(self.defaults["roles"]["planner"]["allowed_tools"],
-                         ["Read", "Glob", "Grep"])
+        self.assertEqual(
+            self.defaults["roles"]["planner"]["allowed_tools"], ["Read", "Glob", "Grep"]
+        )
         for name in ("worker", "", [], None):
             with self.subTest(name=name), self.assertRaises(ConfigurationError):
                 role_config(self.defaults, name)
 
     def test_project_id_rejects_traversal_and_bad_types(self):
-        for project_id in ("../outside", "/tmp/outside", "a/b", "a\\b", ".", "..", "",
-                           "a.toml", "a\x00", "a\n", "a" * 129, True, 1, [], "é"):
+        for project_id in (
+            "../outside",
+            "/tmp/outside",
+            "a/b",
+            "a\\b",
+            ".",
+            "..",
+            "",
+            "a.toml",
+            "a\x00",
+            "a\n",
+            "a" * 129,
+            True,
+            1,
+            [],
+            "é",
+        ):
             with self.subTest(project_id=project_id), self.assertRaises(ConfigurationError):
                 load_config(self.home, project_id)
         load_config(self.home, "Project_1-abc")
@@ -176,9 +253,11 @@ class ConfigurationTests(unittest.TestCase):
             load_config(self.home)
 
     def test_missing_tracked_defaults_are_an_error(self):
-        with patch("orchestrator.config.DEFAULT_CONFIG", self.home / "missing.toml"):
-            with self.assertRaises(ConfigurationError):
-                load_config(self.home)
+        with (
+            patch("orchestrator.config.DEFAULT_CONFIG", self.home / "missing.toml"),
+            self.assertRaises(ConfigurationError),
+        ):
+            load_config(self.home)
 
     def test_bad_role_values(self):
         bad_values = {
@@ -187,8 +266,7 @@ class ConfigurationTests(unittest.TestCase):
             "effort": ["unknown", [], True],
             "timeout_seconds": [0, -1, True, float("nan"), float("inf"), 86401, "60"],
             "max_budget_usd": [0, True, float("nan"), float("inf"), 1001, "5"],
-            "memory": [2, True, "0G", "2GB", "-1G", "1G;evil", "63M", "1025G",
-                       "9" * 5000 + "G"],
+            "memory": [2, True, "0G", "2GB", "-1G", "1G;evil", "63M", "1025G", "9" * 5000 + "G"],
             "cpus": [True, 0, -1, 65, 1.5, "1"],
             "allowed_tools": ["Read", ["Bash"], ["Write"], ["Read", "Read"], [[]]],
             "prompt_path": ["../roles/planner.md", "/tmp/planner.md", "roles/critic.md", []],
@@ -216,9 +294,12 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_no_workers_or_routing(self):
         for section, key, value in (
-            ("workers", "enabled", True), ("workers", "enabled", 0),
-            ("workers", "model", "anything"), ("routing", "enabled", True),
-            ("routing", "rules", [{}]), ("routing", "first_mate", {"model": "x"}),
+            ("workers", "enabled", True),
+            ("workers", "enabled", 0),
+            ("workers", "model", "anything"),
+            ("routing", "enabled", True),
+            ("routing", "rules", [{}]),
+            ("routing", "first_mate", {"model": "x"}),
             ("routing", "default_model", "anything"),
         ):
             with self.subTest(section=section, key=key):
@@ -228,11 +309,18 @@ class ConfigurationTests(unittest.TestCase):
                     validate_config(config)
 
     def test_commands_cannot_override_security_flags(self):
-        for command in ("claude", [], [True], [""], ["--bad"], ["claude", "--version"],
-                        ["claude", "--dangerously-skip-permissions"],
-                        ["codex", "--dangerously-bypass-approvals-and-sandbox"],
-                        ["codex", "-c", "sandbox_mode=\"danger-full-access\""],
-                        ["dangerously-skip-permissions"]):
+        for command in (
+            "claude",
+            [],
+            [True],
+            [""],
+            ["--bad"],
+            ["claude", "--version"],
+            ["claude", "--dangerously-skip-permissions"],
+            ["codex", "--dangerously-bypass-approvals-and-sandbox"],
+            ["codex", "-c", 'sandbox_mode="danger-full-access"'],
+            ["dangerously-skip-permissions"],
+        ):
             with self.subTest(command=command):
                 config = deepcopy(self.defaults)
                 config["adapters"]["claude"]["command"] = command
@@ -240,16 +328,32 @@ class ConfigurationTests(unittest.TestCase):
                     validate_config(config)
 
     def test_required_tables_and_fields(self):
-        for key in ("supervisor", "planning", "execution", "personalization", "workers",
-                    "routing", "roles", "adapters"):
+        for key in (
+            "supervisor",
+            "planning",
+            "execution",
+            "personalization",
+            "workers",
+            "routing",
+            "roles",
+            "adapters",
+        ):
             for replacement in (None, [], "table"):
                 with self.subTest(key=key, replacement=replacement):
                     config = deepcopy(self.defaults)
                     config[key] = replacement
                     with self.assertRaises(ConfigurationError):
                         validate_config(config)
-        for key in ("adapter", "model", "effort", "timeout_seconds", "max_budget_usd",
-                    "memory", "cpus", "allowed_tools"):
+        for key in (
+            "adapter",
+            "model",
+            "effort",
+            "timeout_seconds",
+            "max_budget_usd",
+            "memory",
+            "cpus",
+            "allowed_tools",
+        ):
             config = deepcopy(self.defaults)
             del config["roles"]["planner"][key]
             with self.subTest(key=key), self.assertRaises(ConfigurationError):
@@ -258,8 +362,9 @@ class ConfigurationTests(unittest.TestCase):
     def test_templates_and_prompts(self):
         root = DEFAULT_CONFIG.parent.parent
         self.write("config/local.toml", (root / "config/local.example.toml").read_text())
-        self.write("config/projects/example.toml",
-                   (root / "config/project.example.toml").read_text())
+        self.write(
+            "config/projects/example.toml", (root / "config/project.example.toml").read_text()
+        )
         config = load_config(self.home, "example")
         for role in config["roles"].values():
             self.assertTrue((root / role["prompt_path"]).is_file())

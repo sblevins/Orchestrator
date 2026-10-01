@@ -17,11 +17,21 @@ def _argument(value, name, *, allow_empty=False):
     return value
 
 
-def build_command(config: dict, role: str, prompt: str, cwd: Path,
-                  output_path: Path, session_id: str | None = None) -> list[str]:
+def build_command(
+    config: dict,
+    role: str,
+    prompt: str,
+    cwd: Path,
+    output_path: Path,
+    session_id: str | None = None,
+    *,
+    project_root: Path | None = None,
+    stdin_prompt: bool = False,
+) -> list[str]:
     """Build a read-only invocation; session_id resumes an existing conversation.
 
-    Runtime supplies cwd, a sanitized environment, closed stdin, and deadlines.
+    Runtime supplies cwd, a sanitized environment, prompt-file stdin, and deadlines.
+    Other callers retain positional prompts unless stdin_prompt is enabled.
     No files are read/written here, including the optional harness output artifact.
     """
     try:
@@ -40,28 +50,63 @@ def build_command(config: dict, role: str, prompt: str, cwd: Path,
     if adapter == "claude":
         tools = ",".join(settings["allowed_tools"])
         command += [
-            "-p", "--output-format", "json", "--model", settings["model"],
-            "--effort", settings["effort"], "--permission-mode", "dontAsk",
-            "--tools", tools, "--allowedTools", tools,
-            "--settings", "{}", "--setting-sources", "",
-            "--strict-mcp-config", "--disable-slash-commands",
-            "--max-budget-usd", str(settings["max_budget_usd"]),
+            "-p",
+            "--output-format",
+            "json",
+            "--model",
+            settings["model"],
+            "--effort",
+            settings["effort"],
+            "--permission-mode",
+            "dontAsk",
+            "--tools",
+            tools,
+            "--allowedTools",
+            tools,
+            "--settings",
+            "{}",
+            "--setting-sources",
+            "",
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--max-budget-usd",
+            str(settings["max_budget_usd"]),
         ]
+        if project_root is not None:
+            command += ["--add-dir", _argument(str(project_root), "project_root")]
         if session_id is not None:
             command += ["--resume", session_id]
+        if stdin_prompt:
+            return command
     else:
-        if prompt == "-":
+        if prompt == "-" and not stdin_prompt:
             raise AdapterError("Codex prompt cannot be the stdin sentinel '-'")
         # Codex accepts TOML values. A JSON-escaped validated effort string is
         # also a TOML basic string; never interpolate unquoted configuration.
         command += [
-            "-a", "never", "exec", "-s", "read-only", "-C", working_directory,
-            "-m", settings["model"],
-            "-c", "model_reasoning_effort=" + json.dumps(settings["effort"]),
+            "-a",
+            "never",
+            "exec",
+            "-s",
+            "read-only",
+            "-C",
+            working_directory,
+            "-m",
+            settings["model"],
+            "-c",
+            "model_reasoning_effort=" + json.dumps(settings["effort"]),
         ]
         if session_id is not None:
             command += ["resume"]
-        command += ["--json", "--output-last-message", result_path]
+        command += [
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--json",
+            "--output-last-message",
+            result_path,
+        ]
+        if stdin_prompt:
+            prompt = "-"
         if session_id is not None:
             command += ["--", session_id, prompt]
             return command
@@ -98,8 +143,9 @@ def _events(stdout):
             events = [_decode(line) for line in stdout.splitlines() if line.strip()]
     except (ValueError, RecursionError) as error:
         raise AdapterError("malformed harness JSON") from error
-    if any(not isinstance(event, dict) or not isinstance(event.get("type"), str)
-           for event in events):
+    if any(
+        not isinstance(event, dict) or not isinstance(event.get("type"), str) for event in events
+    ):
         raise AdapterError("harness events must be typed JSON objects")
     return events
 
@@ -148,11 +194,12 @@ def parse_result(adapter: str, stdout: str, returncode: int) -> dict:
     completed_items = {}
     for event in events:
         event_type = event["type"]
-        if (event_type in ("error", "turn.failed")
-                or any(word in event_type.lower()
-                       for word in ("interrupt", "cancel", "abort"))
-                or event.get("is_error") is True
-                or event.get("status") in ("failed", "interrupted", "cancelled", "canceled")):
+        if (
+            event_type in ("error", "turn.failed")
+            or any(word in event_type.lower() for word in ("interrupt", "cancel", "abort"))
+            or event.get("is_error") is True
+            or event.get("status") in ("failed", "interrupted", "cancelled", "canceled")
+        ):
             raise AdapterError("harness reported failure or interruption")
         if adapter == "claude":
             if "session_id" in event:
@@ -202,8 +249,12 @@ def parse_result(adapter: str, stdout: str, returncode: int) -> dict:
     if adapter == "claude":
         if "structured_output" in terminal:
             try:
-                message = json.dumps(terminal["structured_output"], ensure_ascii=False,
-                                     allow_nan=False, separators=(",", ":"))
+                message = json.dumps(
+                    terminal["structured_output"],
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
             except (ValueError, RecursionError) as error:
                 raise AdapterError("invalid structured output") from error
         else:

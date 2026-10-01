@@ -83,14 +83,16 @@ The orchestrator defaults to `claude-sonnet-5-5` with low effort; planner and mo
 The critic defaults to `gpt-6-astra` through Codex with high effort.
 Model identifiers are arbitrary nonempty strings passed unchanged to adapters, not a fixed model catalog.
 These requested identifiers are not a claim of provider availability; configure the exact identifier your provider supports.
-Claude efforts are `low`, `medium`, and `high`; Codex efforts are `minimal`, `low`, `medium`, `high`, and `xhigh`.
+Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Codex efforts are `minimal`, `low`, `medium`, `high`, and `xhigh`.
 No model-specific effort assumptions or silent fallbacks are applied.
 Plain version: you can change any model name, but the chosen command must support the effort setting and the provider must actually offer that model.
 
 Timeouts range from 1 through 86400 seconds, budgets from 0.01 through 1000 USD, and integer CPU reservations from 1 through 64.
 Memory uses positive integer `M` or `G` strings, bounded from `64M` through `1024G`, with `1G` equal to `1024M`.
 Resource settings express requested reservations; the runtime must still obtain machine resources before launching work.
-Allowed tools are a unique list containing only `Read`, `Glob`, and `Grep`; an empty list is valid.
+Allowed tools are a unique list containing only `Read`, `Glob`, and `Grep`.
+Claude supports narrower lists, including an empty list.
+Codex specialists require the full list because the CLI provides a read-only sandbox rather than individual Read/Glob/Grep switches; unsupported narrower permissions are rejected.
 Adapters must translate these logical read-only permissions into their own enforcement and reject unsupported restrictions rather than widening access.
 Plain version: configuration says what a specialist may read and how much it may use; the launcher must enforce those limits.
 
@@ -115,3 +117,13 @@ Claude remains the preferred interactive frontend, with native voice handled by 
 There is no default worker model, no executable First Mate policy, and no worker launch permission.
 Attempts to enable workers or routing, add routing rules, or populate the reserved policy table fail validation.
 Plain version: both chat interfaces may use the same supervisor, but temporary workers cannot run until a real router is implemented.
+
+## Monitor intake
+
+`monitoring.review_every_prompt = true` requests review for every prompt.
+By default it is false, and only exact normalized entries in `monitoring.routine_prompts` avoid waking a review.
+Normalization ignores case, surrounding/repeated whitespace, and trailing question marks, periods, or exclamation marks.
+Combined instructions and unknown messages are reviewed.
+All prompts remain saved regardless of this classification; quiet prompts remain available in later review evidence.
+Prompts saved before project selection are mirrored into that project when the instance binds, with duplicate mirroring prevented by prompt identity.
+Plain version: a simple status question does not need another model call, but changing the work does.

@@ -1,12 +1,23 @@
 """Conservative prompt triage without delegating reviewer visibility to the coordinator."""
+
 from __future__ import annotations
 
 import re
 
 ROUTINE_PROMPTS = {
-    "/status", "/tasks", "/progress", "status", "progress", "what's the status",
-    "what is the status", "what's the status of work", "what is the status of work",
-    "how is it going", "show progress", "show the current status", "list running tasks",
+    "/status",
+    "/tasks",
+    "/progress",
+    "status",
+    "progress",
+    "what's the status",
+    "what is the status",
+    "what's the status of work",
+    "what is the status of work",
+    "how is it going",
+    "show progress",
+    "show the current status",
+    "list running tasks",
 }
 
 

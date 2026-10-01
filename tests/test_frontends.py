@@ -1,8 +1,8 @@
 import json
-from pathlib import Path
 import tempfile
 import unittest
 import uuid
+from pathlib import Path
 
 from orchestrator.config import ConfigurationError, load_config
 from orchestrator.frontends import ROOT, build_frontend_command
@@ -18,33 +18,67 @@ class FrontendTests(unittest.TestCase):
 
     def test_claude_native_explicit_private_mcp(self):
         command = build_frontend_command(self.home, self.config, "claude", self.session)
-        self.assertEqual(command[command.index("--model") + 1], self.config["roles"]["orchestrator"]["model"])
+        self.assertEqual(
+            command[command.index("--model") + 1], self.config["roles"]["orchestrator"]["model"]
+        )
         self.assertEqual(command[command.index("--session-id") + 1], self.session)
         self.assertIn("--strict-mcp-config", command)
-        self.assertFalse({"--print", "--bare", "--safe-mode", "--dangerously-skip-permissions"} & set(command))
+        self.assertFalse(
+            {"--print", "--bare", "--safe-mode", "--dangerously-skip-permissions"} & set(command)
+        )
         path = Path(command[command.index("--mcp-config") + 1])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         server = json.loads(path.read_text())["mcpServers"]["orchestrator"]
-        self.assertEqual(server, {"command": str(ROOT / "bin/orchestrator"), "args": ["--home", str(self.home), "mcp", "--session", self.session]})
+        self.assertEqual(
+            server,
+            {
+                "command": str(ROOT / "bin/orchestrator"),
+                "args": ["--home", str(self.home), "mcp", "--session", self.session],
+            },
+        )
+
+    def test_configured_read_tools_are_not_widened(self):
+        self.config["roles"]["orchestrator"]["allowed_tools"] = []
+        for frontend, expected in [("claude", "AskUserQuestion"), ("pi", "orchestrator")]:
+            command = build_frontend_command(self.home, self.config, frontend, self.session)
+            self.assertEqual(command[command.index("--tools") + 1], expected)
 
     def test_channels_explicit_only(self):
         command = build_frontend_command(self.home, self.config, "claude", self.session, True)
         self.assertIn("--dangerously-load-development-channels", command)
         path = Path(command[command.index("--mcp-config") + 1])
-        self.assertIn("--channels", json.loads(path.read_text())["mcpServers"]["orchestrator"]["args"])
+        self.assertIn(
+            "--channels", json.loads(path.read_text())["mcpServers"]["orchestrator"]["args"]
+        )
         with self.assertRaises(ConfigurationError):
             build_frontend_command(self.home, self.config, "pi", self.session, True)
 
     def test_pi_provider_and_separate_storage(self):
-        for adapter, provider, effort in [("claude", "anthropic", "high"), ("codex", "openai-codex", "xhigh")]:
+        for adapter, provider, effort in [
+            ("claude", "anthropic", "high"),
+            ("codex", "openai-codex", "xhigh"),
+        ]:
             self.config["roles"]["orchestrator"].update(adapter=adapter, effort=effort)
             command = build_frontend_command(self.home, self.config, "pi", self.session)
             self.assertEqual(command[command.index("--provider") + 1], provider)
             self.assertEqual(command[command.index("--thinking") + 1], effort)
-            self.assertEqual(command[command.index("-e") + 1], str(ROOT / ".pi/extensions/orchestrator.ts"))
+            self.assertEqual(
+                command[command.index("-e") + 1], str(ROOT / ".pi/extensions/orchestrator.ts")
+            )
             self.assertTrue(Path(command[command.index("--session-dir") + 1]).is_dir())
         with self.assertRaises(ConfigurationError):
             build_frontend_command(self.home, self.config, "claude", self.session)
+
+    def test_private_prompt_file_for_each_frontend(self):
+        for frontend, flag in (
+            ("claude", "--append-system-prompt-file"),
+            ("pi", "--append-system-prompt"),
+        ):
+            command = build_frontend_command(self.home, self.config, frontend, self.session)
+            path = Path(command[command.index(flag) + 1])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertIn((ROOT / "roles/orchestrator.md").read_text(), path.read_text())
+            self.assertIn(self.config["personalization"]["communication_style"], path.read_text())
 
     def test_invalid_session_and_symlinks(self):
         with self.assertRaises(ConfigurationError):
@@ -54,11 +88,15 @@ class FrontendTests(unittest.TestCase):
             build_frontend_command(self.home, self.config, "claude", self.session)
 
     def test_hook_settings_contract(self):
-        hooks = json.loads((ROOT / ".claude/settings.json").read_text())["hooks"]
+        command = build_frontend_command(self.home, self.config, "claude", self.session)
+        settings_path = Path(command[command.index("--settings") + 1])
+        self.assertEqual(settings_path.stat().st_mode & 0o777, 0o600)
+        hooks = json.loads(settings_path.read_text())["hooks"]
         for event, matchers in hooks.items():
             for matcher in matchers:
                 for hook in matcher["hooks"]:
-                    self.assertIn('$CLAUDE_PROJECT_DIR/bin/orchestrator', hook["command"])
+                    self.assertIn(str(ROOT / "bin/orchestrator"), hook["command"])
+                    self.assertNotIn("$CLAUDE_PROJECT_DIR", hook["command"])
                     if hook.get("asyncRewake"):
                         self.assertEqual(event, "Stop")
                         self.assertNotIn("async", hook)

@@ -19,17 +19,16 @@ Merge tracked `config/default.toml`, optional private `config/local.toml`, then 
 All role/model names are strings, not hardcoded model enums; validate actual structure, supported adapter effort values, bounded numbers, tool permissions, and paths.
 Runtime-critical keys: `[supervisor]` poll_seconds, heartbeat_seconds, stale_seconds, max_parallel, monitor_interval_seconds, monitor_batch_events; `[personalization]` name, communication_style; `[workers]` enabled=false; `[roles.<role>]` adapter, model, effort, timeout_seconds, max_budget_usd, memory, cpus, allowed_tools; `[adapters.<name>]` command as an argv list.
 Core role defaults: orchestrator Claude Sonnet 5.5 low, planner Claude Opus 5.5 high, critic Codex GPT-6 Astra high, monitor Claude Opus 5.5 high.
-Use high rather than unsupported CLI xhigh for the Claude adapter unless the actual CLI documents support.
+The installed Claude CLI supports low, medium, high, xhigh, and max; model-specific availability still requires validation.
 `[routing]` is disabled and contains empty rules, with no worker model default.
-The config agent owns config module, config templates, role prompts, and config tests only.
 
 `orchestrator.store.Store(home: Path)` initializes private `data/state.sqlite3` with foreign keys, WAL, busy_timeout, schema version, transactional writes, and immutable events.
 Store owns stable projects, project-bound sessions, plan versions, tasks and dependencies, run attempts, heartbeats, artifact references, review findings, holds, and acknowledged per-session inbox notifications.
 No caller declares success just because a process exits; adapters must report a successful terminal result.
 Job launch is recorded before a runner starts, and ownership tokens fence stale attempts.
-Store API is implemented by parent; consumers may use its documented public methods once available.
+Store APIs enforce these boundaries for all callers.
 
-`orchestrator.adapters` will expose `build_command(config: dict, role: str, prompt: str, cwd: Path, output_path: Path, session_id: str | None = None) -> list[str]` and `parse_result(adapter: str, stdout: str, returncode: int) -> dict` returning `{text, session_id, cost_usd}` or raising `AdapterError`.
+`orchestrator.adapters` exposes `build_command(config: dict, role: str, prompt: str, cwd: Path, output_path: Path, session_id: str | None = None) -> list[str]` and `parse_result(adapter: str, stdout: str, returncode: int) -> dict` returning `{text, session_id, cost_usd}` or raising `AdapterError`.
 Commands never use shell interpolation or silently downgrade a model/effort.
 Claude/Codex core specialists must be read-only, noninteractive, and bounded; no permission bypass flags.
 This module does not spawn processes or own persistence.

@@ -1,4 +1,5 @@
 """Local singleton scheduler and independent, resource-reserved task runners."""
+
 from __future__ import annotations
 
 import argparse
@@ -6,13 +7,13 @@ import contextlib
 import fcntl
 import json
 import os
-from pathlib import Path
 import selectors
 import shutil
 import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from .config import load_config, role_config
 from .store import NOTE_NAMES, Store, atomic_write, encode
@@ -43,8 +44,12 @@ def _metadata(store: Store, key: str) -> dict:
 def service_status(home: Path) -> dict:
     store = Store(home)
     record = _metadata(store, "supervisor")
-    return {**record, "running": _alive(record), "home": str(store.home),
-            "active_tasks": len(store.tasks(states=("starting", "running")))}
+    return {
+        **record,
+        "running": _alive(record),
+        "home": str(store.home),
+        "active_tasks": len(store.tasks(states=("starting", "running"))),
+    }
 
 
 def _environment() -> dict:
@@ -57,16 +62,39 @@ def _environment() -> dict:
     return environment
 
 
-def _resource_command(memory: str, cpus: int, seconds: float, description: str,
-                      arguments: list[str]) -> list[str]:
+def _resource_command(
+    memory: str, cpus: int, seconds: float, description: str, arguments: list[str]
+) -> list[str]:
     executable = shutil.which("machine-resources")
     if not executable:
-        raise RuntimeError("Install machine-resources and put it on PATH before starting the service")
-    subprocess.run([executable, "status"], check=True, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, timeout=10)
-    return [executable, "run", "-m", memory, "-c", str(cpus), "-e", f"{seconds:g}s",
-            "-d", description, "--hard-limit", "--", sys.executable, "-m",
-            "orchestrator.runtime", *arguments]
+        raise RuntimeError(
+            "Install machine-resources and put it on PATH before starting the service"
+        )
+    subprocess.run(
+        [executable, "status"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=10,
+    )
+    return [
+        executable,
+        "run",
+        "-m",
+        memory,
+        "-c",
+        str(cpus),
+        "-e",
+        f"{seconds:g}s",
+        "-d",
+        description,
+        "--hard-limit",
+        "--",
+        sys.executable,
+        "-m",
+        "orchestrator.runtime",
+        *arguments,
+    ]
 
 
 @contextlib.contextmanager
@@ -95,24 +123,37 @@ def ensure_supervisor(home: Path) -> dict:
                 if status["running"]:
                     return status
                 time.sleep(0.1)
-            raise RuntimeError("Supervisor startup is busy; inspect machine-resources status and retry")
+            raise RuntimeError(
+                "Supervisor startup is busy; inspect machine-resources status and retry"
+            )
         if service_status(home)["running"]:
             return service_status(home)
-        command = _resource_command("256M", 1, 86400, "orchestrator supervisor",
-                                    ["supervise", "--home", str(store.home)])
-        launcher = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL, start_new_session=True,
-                                    env=_environment(), cwd=TRACKED_ROOT)
+        command = _resource_command(
+            "256M", 1, 86400, "orchestrator supervisor", ["supervise", "--home", str(store.home)]
+        )
+        launcher = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env=_environment(),
+            cwd=TRACKED_ROOT,
+        )
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             status = service_status(home)
             if status["running"]:
                 return status
             if launcher.poll() is not None:
-                raise RuntimeError(f"Supervisor reservation failed (exit {launcher.returncode}); "
-                                   "inspect machine-resources status, then retry")
+                raise RuntimeError(
+                    f"Supervisor reservation failed (exit {launcher.returncode}); "
+                    "inspect machine-resources status, then retry"
+                )
             time.sleep(0.1)
-        raise RuntimeError("Supervisor did not become ready within 15 seconds; inspect resource registry")
+        raise RuntimeError(
+            "Supervisor did not become ready within 15 seconds; inspect resource registry"
+        )
 
 
 def _signal_group(record: dict, number: int) -> None:
@@ -124,9 +165,15 @@ def _signal_group(record: dict, number: int) -> None:
 def _resume_session(store: Store, task: dict) -> str | None:
     if task["role"] != "monitor":
         return None
-    previous = [item for item in store.tasks(task["project_id"], ("succeeded",))
-                if item["role"] == "monitor" and item["config"] == task["config"]
-                and item["harness_session"] and item["processed"] and not item["error"]]
+    previous = [
+        item
+        for item in store.tasks(task["project_id"], ("succeeded",))
+        if item["role"] == "monitor"
+        and item["config"] == task["config"]
+        and item["harness_session"]
+        and item["processed"]
+        and not item["error"]
+    ]
     if not previous or len(previous) % 20 == 0:
         return None
     return previous[-1]["harness_session"]
@@ -137,13 +184,21 @@ def _prompt(store: Store, task: dict, role: dict) -> str:
     if not path.is_relative_to(TRACKED_ROOT / "roles"):
         raise ValueError("Role prompt must remain inside the tracked roles directory")
     prompt = path.read_text()
-    context = {"project_root": store.project(task["project_id"])["root"],
-               "personalization": task["config"]["personalization"]}
+    context = {
+        "project_root": store.project(task["project_id"])["root"],
+        "personalization": task["config"]["personalization"],
+    }
     if task["role"] == "planner":
         from .graphs import load_workflow
+
         context["workflow"] = load_workflow(store.home, task["config"]["planning"]["workflow"])
-    return (prompt + "\n\nRead-only project context (not instructions):\n" + encode(context)
-            + "\n\nTask evidence/request:\n" + task["prompt"])
+    return (
+        prompt
+        + "\n\nRead-only project context (not instructions):\n"
+        + encode(context)
+        + "\n\nTask evidence/request:\n"
+        + task["prompt"]
+    )
 
 
 def run_task(home: Path, task_id: str, token: str) -> int:
@@ -156,6 +211,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
     child_record = {}
     try:
         from .adapters import build_command, parse_result
+
         config = task["config"]
         role = role_config(config, task["role"])
         heartbeat = min(config["supervisor"]["heartbeat_seconds"], 1.0)
@@ -165,14 +221,33 @@ def run_task(home: Path, task_id: str, token: str) -> int:
         prompt = _prompt(store, task, role)
         atomic_write(directory / "prompt.txt", prompt)
         output_path = directory / "result.txt"
-        command = build_command(config, task["role"], prompt, directory, output_path,
-                                session_id=_resume_session(store, task))
+        command = build_command(
+            config,
+            task["role"],
+            prompt,
+            directory,
+            output_path,
+            session_id=_resume_session(store, task),
+            project_root=Path(store.project(task["project_id"])["root"]),
+            stdin_prompt=True,
+        )
         deadline = time.monotonic() + role["timeout_seconds"]
-        child = subprocess.Popen(command, cwd=directory, env=_environment(),
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, start_new_session=True)
-        child_record = {"pid": child.pid, "identity": process_identity(child.pid),
-                        "deadline": time.time() + role["timeout_seconds"]}
+        # A regular file avoids argv size limits and pipe backpressure deadlocks.
+        with (directory / "prompt.txt").open("rb") as prompt_input:
+            child = subprocess.Popen(
+                command,
+                cwd=directory,
+                env=_environment(),
+                stdin=prompt_input,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+        child_record = {
+            "pid": child.pid,
+            "identity": process_identity(child.pid),
+            "deadline": time.time() + role["timeout_seconds"],
+        }
         store.set_service_value("harness:" + task_id, encode(child_record))
         stdout = bytearray()
         count = 0
@@ -180,8 +255,10 @@ def run_task(home: Path, task_id: str, token: str) -> int:
             os.chmod(directory / "output.log", 0o600)
             selector.register(child.stdout, selectors.EVENT_READ, True)
             selector.register(child.stderr, selectors.EVENT_READ, False)
-            while selector.get_map() or os.waitid(
-                    os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+            while (
+                selector.get_map()
+                or os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None
+            ):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Harness deadline exceeded")
                 if not store.heartbeat(task_id, token):
@@ -207,18 +284,24 @@ def run_task(home: Path, task_id: str, token: str) -> int:
             returncode = child.wait(timeout=1)
         # The last-message file is not proof of successful completion. Only the
         # adapter's stdout protocol can establish terminal success.
-        if output_path.exists() and (output_path.is_symlink()
-                                    or output_path.stat().st_size > OUTPUT_LIMIT):
+        if output_path.exists() and (
+            output_path.is_symlink() or output_path.stat().st_size > OUTPUT_LIMIT
+        ):
             raise RuntimeError("Unsafe or oversized harness result")
         result = parse_result(role["adapter"], stdout.decode("utf-8", errors="replace"), returncode)
         if returncode != 0:
             raise RuntimeError(f"Harness failed with exit {returncode}")
         values = result if isinstance(result, dict) else vars(result)
-        if not store.finish(task_id, token, text=values["text"],
-                            harness_session=values.get("session_id"), cost_usd=values.get("cost_usd")):
+        if not store.finish(
+            task_id,
+            token,
+            text=values["text"],
+            harness_session=values.get("session_id"),
+            cost_usd=values.get("cost_usd"),
+        ):
             return 1
         return 0 if store.task(task_id)["state"] == "succeeded" else 1
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - contain each task failure in durable state
         store.finish(task_id, token, state="failed", error=str(error))
         return 1
     finally:
@@ -260,9 +343,14 @@ def _process_results(store: Store) -> None:
             elif task["role"] == "planner" and task["plan_id"]:
                 if store.install_graph(task["plan_id"], task["id"], value):
                     plan = store.plan(task["plan_id"])
-                    prompt = encode({"request": plan["request"], "validated_graph": value,
-                                     "evidence": store.snapshot(task["project_id"]),
-                                     "response": {"verdict": "approved|changes_requested", "findings": []}})
+                    prompt = encode(
+                        {
+                            "request": plan["request"],
+                            "validated_graph": value,
+                            "evidence": store.snapshot(task["project_id"]),
+                            "response": {"verdict": "approved|changes_requested", "findings": []},
+                        }
+                    )
                     store.attach_critic(task, prompt, task["config"])
                 else:
                     store.processed(task["id"])
@@ -270,12 +358,20 @@ def _process_results(store: Store) -> None:
                 store.apply_critique(task, value["verdict"], value["findings"])
                 if value["verdict"] == "changes_requested" and hasattr(store, "revise_plan"):
                     plan = store.plan(task["plan_id"])
-                    store.revise_plan(task["plan_id"], encode({"original_request": plan["request"],
-                                      "previous_graph": plan["graph_json"], "critique": value}),
-                                      task["config"])
+                    store.revise_plan(
+                        task["plan_id"],
+                        encode(
+                            {
+                                "original_request": plan["request"],
+                                "previous_graph": plan["graph_json"],
+                                "critique": value,
+                            }
+                        ),
+                        task["config"],
+                    )
             else:
                 store.processed(task["id"])
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - contain each task failure in durable state
             if task["role"] == "monitor":
                 store.monitor_failure(task, str(error))
             else:
@@ -290,9 +386,13 @@ def _reconcile(store: Store, launchers: dict) -> None:
         expired = time.time() - task["updated"] > settings["stale_seconds"]
         if task["state"] == "starting":
             if exitcode is not None or expired:
-                store.finish(task["id"], task["token"], state="failed",
-                             error=f"Runner never registered; reservation exit={exitcode}. "
-                             "Inspect machine-resources status and explicitly retry")
+                store.finish(
+                    task["id"],
+                    task["token"],
+                    state="failed",
+                    error=f"Runner never registered; reservation exit={exitcode}. "
+                    "Inspect machine-resources status and explicitly retry",
+                )
         else:
             alive = process_identity(task["runner_pid"]) == task["runner_identity"]
             harness = _metadata(store, "harness:" + task["id"])
@@ -303,8 +403,12 @@ def _reconcile(store: Store, launchers: dict) -> None:
                     # The runner is not necessarily a process-group leader when resource-wrapped.
                     with contextlib.suppress(ProcessLookupError):
                         os.kill(task["runner_pid"], signal.SIGKILL)
-                store.finish(task["id"], task["token"], state="unknown",
-                             error="Runner lost or exceeded deadline; no automatic replay")
+                store.finish(
+                    task["id"],
+                    task["token"],
+                    state="unknown",
+                    error="Runner lost or exceeded deadline; no automatic replay",
+                )
     for task_id, launcher in list(launchers.items()):
         if launcher.poll() is not None:
             del launchers[task_id]
@@ -319,33 +423,71 @@ def supervise(home: Path, once: bool = False) -> None:
         try:
             while True:
                 config = load_config(store.home)
-                store.set_service_value("supervisor", encode({"pid": os.getpid(),
-                                        "identity": process_identity(os.getpid()), "heartbeat": time.time()}))
+                store.set_service_value(
+                    "supervisor",
+                    encode(
+                        {
+                            "pid": os.getpid(),
+                            "identity": process_identity(os.getpid()),
+                            "heartbeat": time.time(),
+                        }
+                    ),
+                )
                 _reconcile(store, launchers)
                 _process_results(store)
                 for project in store.projects():
                     project_config = load_config(store.home, project["id"])
                     settings = project_config["supervisor"]
-                    candidate = store.monitor_candidate(project["id"], settings["monitor_batch_events"])
+                    candidate = store.monitor_candidate(
+                        project["id"], settings["monitor_batch_events"]
+                    )
                     if candidate:
-                        prompt = encode({"reviewed_through": candidate["cursor"],
-                                         "events": candidate["events"], "state": store.snapshot(project["id"]),
-                                         "notes": [store.read_note(project["id"], name) for name in sorted(NOTE_NAMES)]})
-                        store.schedule_monitor(project["id"], candidate, prompt, project_config,
-                                               settings["monitor_interval_seconds"])
+                        prompt = encode(
+                            {
+                                "reviewed_through": candidate["cursor"],
+                                "events": candidate["events"],
+                                "state": store.snapshot(project["id"]),
+                                "notes": [
+                                    store.read_note(project["id"], name)
+                                    for name in sorted(NOTE_NAMES)
+                                ],
+                            }
+                        )
+                        store.schedule_monitor(
+                            project["id"],
+                            candidate,
+                            prompt,
+                            project_config,
+                            settings["monitor_interval_seconds"],
+                        )
                 while task := store.claim_next(config["supervisor"]["max_parallel"]):
                     try:
                         role = role_config(task["config"], task["role"])
-                        command = _resource_command(role["memory"], role["cpus"],
-                                                    role["timeout_seconds"] + 60,
-                                                    f"orchestrator {task['role']} {task['id']}",
-                                                    ["run-task", "--home", str(store.home),
-                                                     "--task-id", task["id"], "--token", task["token"]])
+                        command = _resource_command(
+                            role["memory"],
+                            role["cpus"],
+                            role["timeout_seconds"] + 60,
+                            f"orchestrator {task['role']} {task['id']}",
+                            [
+                                "run-task",
+                                "--home",
+                                str(store.home),
+                                "--task-id",
+                                task["id"],
+                                "--token",
+                                task["token"],
+                            ],
+                        )
                         launchers[task["id"]] = subprocess.Popen(
-                            command, start_new_session=True, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            env=_environment(), cwd=TRACKED_ROOT)
-                    except Exception as error:
+                            command,
+                            start_new_session=True,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            env=_environment(),
+                            cwd=TRACKED_ROOT,
+                        )
+                    except Exception as error:  # noqa: BLE001 - contain each task failure in durable state
                         store.finish(task["id"], task["token"], state="failed", error=str(error))
                 if time.time() - float(store.service_value("last_backup", "0")) >= 86400:
                     store.backup()

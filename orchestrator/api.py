@@ -1,10 +1,11 @@
 """One narrow operation surface shared by CLI, MCP, Claude hooks, and Pi."""
+
 from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 from .config import load_config
 from .intake import needs_review
@@ -22,6 +23,7 @@ def _text(payload, field, maximum=100000):
 
 def _start_service(home):
     from .runtime import ensure_supervisor
+
     return ensure_supervisor(home)
 
 
@@ -37,13 +39,35 @@ def record_prompt(store: Store, session_id: str, prompt: str) -> dict:
     important = needs_review(prompt, config)
     result = {"prompt_id": prompt_id, "review_required": important, "path": str(path)}
     if session["project_id"] and session["active"] and not session["observer"]:
-        result["event_id"] = store.record(session_id, "user.message", {
-            "prompt": prompt[:12000], "prompt_id": prompt_id, "full_prompt_path": str(path),
-            "truncated": len(prompt) > 12000,
-            "sha256": hashlib.sha256(prompt.encode()).hexdigest(),
-        }, review_required=important)
+        result["event_id"] = _mirror_prompt(store, session_id, document, path, config)
     store.set_service_value(f"last_prompt_review:{session_id}", "true" if important else "false")
     return result
+
+
+def _mirror_prompt(store, session_id, document, path, config):
+    prompt = document["prompt"]
+    return store.record(
+        session_id,
+        "user.message",
+        {
+            "prompt": prompt[:12000],
+            "prompt_id": document["id"],
+            "full_prompt_path": str(path),
+            "truncated": len(prompt) > 12000,
+            "sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        },
+        review_required=needs_review(prompt, config),
+    )
+
+
+def _mirror_saved_prompts(store, session_id, project_id):
+    config = load_config(store.home, project_id)
+    directory = store.data / "sessions" / session_id / "prompts"
+    saved = [(path, json.loads(path.read_text())) for path in directory.glob("*.json")]
+    for path, document in sorted(saved, key=lambda item: (item[1]["created"], item[1]["id"])):
+        if document["session_id"] != session_id:
+            raise StateError("Saved prompt belongs to another session")
+        _mirror_prompt(store, session_id, document, path, config)
 
 
 def _bound(store, session_id, *, writer=False):
@@ -51,7 +75,9 @@ def _bound(store, session_id, *, writer=False):
     if not session["project_id"]:
         raise StateError("Select a project first with bind_project")
     if not session["active"]:
-        raise StateError("This session no longer owns an active frontend; start or resume explicitly")
+        raise StateError(
+            "This session no longer owns an active frontend; start or resume explicitly"
+        )
     return session, session["project_id"]
 
 
@@ -79,14 +105,25 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         # Model-facing tools never take over another coordinator's authority.
         if payload.get("takeover"):
             raise StateError("Takeover is an operator-only startup option")
-        bound = store.open_session(session_id, session["frontend"], project_id,
-                                   observer=bool(session["observer"]))
+        bound = store.open_session(
+            session_id, session["frontend"], project_id, observer=bool(session["observer"])
+        )
+        if not bound["observer"]:
+            _mirror_saved_prompts(store, session_id, project_id)
         service = _start_service(home)
-        return {"session": bound, "state": store.snapshot(project_id), "service": service,
-                "notes": [store.read_note(project_id, name) for name in sorted(NOTE_NAMES)]}
+        return {
+            "session": bound,
+            "state": store.snapshot(project_id),
+            "service": service,
+            "notes": [store.read_note(project_id, name) for name in sorted(NOTE_NAMES)],
+        }
     if action == "record_prompt":
         return record_prompt(store, session_id, payload.get("prompt", ""))
-    session, project_id = _bound(store, session_id, writer=action not in READ_ACTIONS | {"acknowledge"})
+    if action == "updates":
+        return {"updates": store.updates(session_id)}
+    session, project_id = _bound(
+        store, session_id, writer=action not in READ_ACTIONS | {"acknowledge"}
+    )
     config = load_config(home, project_id)
     if action == "status":
         state = store.snapshot(project_id)
@@ -95,6 +132,7 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         return state
     if action == "start_plan":
         from .graphs import load_workflow
+
         # Validate the chosen custom template before paying for a planning run.
         load_workflow(home, config["planning"]["workflow"])
         service = _start_service(home)
@@ -102,14 +140,14 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         return {"plan": plan, "service": service, "execution_authorized": False}
     if action == "task":
         task = _project_task(store, project_id, _text(payload, "task_id", 96))
-        return {key: value for key, value in task.items() if key not in {"token", "config", "prompt"}}
+        return {
+            key: value for key, value in task.items() if key not in {"token", "config", "prompt"}
+        }
     if action == "cancel_task":
         task_id = _text(payload, "task_id", 96)
         _project_task(store, project_id, task_id)
         store.cancel(session_id, task_id)
         return {"task_id": task_id, "cancel_requested": True}
-    if action == "updates":
-        return {"updates": store.updates(session_id)}
     if action == "acknowledge":
         event_ids = payload.get("event_ids")
         store.acknowledge(session_id, event_ids)
@@ -126,8 +164,9 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         return store.read_note(project_id, _text(payload, "name", 64))
     if action == "write_note":
         text = payload.get("text")
-        return store.write_note(session_id, _text(payload, "name", 64), text,
-                                _text(payload, "expected_revision", 64))
+        return store.write_note(
+            session_id, _text(payload, "name", 64), text, _text(payload, "expected_revision", 64)
+        )
     if action == "graph":
         plan_id = _text(payload, "plan_id", 96)
         if store.plan(plan_id)["project_id"] != project_id:
@@ -135,14 +174,19 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         return store.graph_snapshot(plan_id, config["execution"])
     if action == "workflows":
         from .graphs import load_workflow
+
         directory = Path(__file__).resolve().parent.parent / "workflows"
         names = {path.stem for path in directory.glob("*.json")}
         names.update(path.stem for path in (Path(home) / "config" / "workflows").glob("*.json"))
-        return {"selected": config["planning"]["workflow"],
-                "workflows": {name: load_workflow(home, name) for name in sorted(names)}}
+        return {
+            "selected": config["planning"]["workflow"],
+            "workflows": {name: load_workflow(home, name) for name in sorted(names)},
+        }
     if action == "request_review":
         reason = _text(payload, "reason", 12000)
-        event_id = store.record(session_id, "decision.recorded", {"explicit_review_request": reason})
+        event_id = store.record(
+            session_id, "decision.recorded", {"explicit_review_request": reason}
+        )
         # Do not reset a circuit-breaker's cooldown or overlap an existing monitor.
         service = _start_service(home)
         return {"event_id": event_id, "review_pending": True, "service": service}
@@ -166,9 +210,15 @@ FIELDS = {
     "cancel_task": ({"task_id": "string"}, ["task_id"]),
     "updates": ({}, []),
     "acknowledge": ({"event_ids": "array"}, ["event_ids"]),
-    "record_decision": ({"summary": "string", "rationale": "string", "scope_change": "boolean"}, ["summary"]),
+    "record_decision": (
+        {"summary": "string", "rationale": "string", "scope_change": "boolean"},
+        ["summary"],
+    ),
     "read_note": ({"name": "string"}, ["name"]),
-    "write_note": ({"name": "string", "text": "string", "expected_revision": "string"}, ["name", "text", "expected_revision"]),
+    "write_note": (
+        {"name": "string", "text": "string", "expected_revision": "string"},
+        ["name", "text", "expected_revision"],
+    ),
     "graph": ({"plan_id": "string"}, ["plan_id"]),
     "workflows": ({}, []),
     "request_review": ({"reason": "string"}, ["reason"]),
@@ -204,12 +254,26 @@ def tool_definitions(require_session: bool) -> list[dict]:
             properties["event_ids"]["items"] = {"type": "integer"}
         required = list(required)
         if require_session:
-            properties["session_id"] = {"type": "string", "description": "Exact instance ID supplied by SessionStart"}
+            properties["session_id"] = {
+                "type": "string",
+                "description": "Exact instance ID supplied by SessionStart",
+            }
             required.append("session_id")
-        tools.append({"name": name, "description": DESCRIPTIONS[name],
-                      "inputSchema": {"type": "object", "properties": properties,
-                                      "required": required, "additionalProperties": False},
-                      "annotations": {"readOnlyHint": name in READ_ACTIONS,
-                                      "destructiveHint": name not in READ_ACTIONS,
-                                      "openWorldHint": name in {"start_plan", "bind_project", "request_review"}}})
+        tools.append(
+            {
+                "name": name,
+                "description": DESCRIPTIONS[name],
+                "inputSchema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False,
+                },
+                "annotations": {
+                    "readOnlyHint": name in READ_ACTIONS,
+                    "destructiveHint": name not in READ_ACTIONS,
+                    "openWorldHint": name in {"start_plan", "bind_project", "request_review"},
+                },
+            }
+        )
     return tools

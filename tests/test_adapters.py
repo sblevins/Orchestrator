@@ -1,27 +1,34 @@
 """Offline protocol fixtures and actual subprocess tests; never call paid models."""
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from copy import deepcopy
+from pathlib import Path
 
 from orchestrator.adapters import AdapterError, build_command, parse_result
 from orchestrator.config import load_config
 
-
 CLAUDE_RESULT = {
-    "type": "result", "subtype": "success", "is_error": False,
-    "result": "review complete", "session_id": "claude-session", "total_cost_usd": 0.12,
+    "type": "result",
+    "subtype": "success",
+    "is_error": False,
+    "result": "review complete",
+    "session_id": "claude-session",
+    "total_cost_usd": 0.12,
 }
 CODEX_EVENTS = [
     {"type": "thread.started", "thread_id": "codex-thread"},
     {"type": "turn.started"},
-    {"type": "item.completed", "item": {
-        "id": "item_0", "type": "agent_message", "text": "checking"}},
-    {"type": "item.completed", "item": {
-        "id": "item_1", "type": "agent_message", "text": '{"approved":true}'}},
+    {
+        "type": "item.completed",
+        "item": {"id": "item_0", "type": "agent_message", "text": "checking"},
+    },
+    {
+        "type": "item.completed",
+        "item": {"id": "item_1", "type": "agent_message", "text": '{"approved":true}'},
+    },
     {"type": "turn.completed", "usage": {"input_tokens": 123, "output_tokens": 45}},
 ]
 
@@ -45,10 +52,15 @@ class CommandTests(unittest.TestCase):
         command = self.command()
         self.assertEqual(command[0], "claude")
         for flag, value in {
-            "--model": "claude-opus-5-5", "--effort": "high",
-            "--output-format": "json", "--permission-mode": "dontAsk",
-            "--tools": "Read,Glob,Grep", "--allowedTools": "Read,Glob,Grep",
-            "--settings": "{}", "--setting-sources": "", "--max-budget-usd": "15.0",
+            "--model": "claude-opus-5-5",
+            "--effort": "high",
+            "--output-format": "json",
+            "--permission-mode": "dontAsk",
+            "--tools": "Read,Glob,Grep",
+            "--allowedTools": "Read,Glob,Grep",
+            "--settings": "{}",
+            "--setting-sources": "",
+            "--max-budget-usd": "15.0",
         }.items():
             self.assertEqual(command[command.index(flag) + 1], value)
         self.assertIn("-p", command)
@@ -73,6 +85,48 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(command[command.index("--output-last-message") + 1], str(self.output))
         self.assertEqual(command[-2:], ["--", "--hostile prompt"])
         self.assertNotIn("--max-budget-usd", command)
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn("--ignore-rules", command)
+
+    def test_stdin_prompt_and_project_access_preserve_policy(self):
+        project = self.home / "project with spaces"
+        for session in (None, "saved-session"):
+            for role in ("planner", "critic"):
+                with self.subTest(role=role, session=session):
+                    command = build_command(
+                        self.config,
+                        role,
+                        "large prompt",
+                        self.home,
+                        self.output,
+                        session,
+                        project_root=project,
+                        stdin_prompt=True,
+                    )
+                    self.assertNotIn("large prompt", command)
+                    if role == "planner":
+                        self.assertIn("-p", command)
+                        self.assertNotIn("--", command)
+                        self.assertEqual(command[command.index("--add-dir") + 1], str(project))
+                        self.assertEqual(command[command.index("--tools") + 1], "Read,Glob,Grep")
+                        if session:
+                            self.assertEqual(command[-2:], ["--resume", session])
+                    else:
+                        expected = ["--", session, "-"] if session else ["--", "-"]
+                        self.assertEqual(command[-len(expected) :], expected)
+                        self.assertEqual(command[command.index("-s") + 1], "read-only")
+                        self.assertIn("--ignore-user-config", command)
+                        self.assertIn("--ignore-rules", command)
+        self.assertNotIn("--add-dir", self.command())
+        with self.assertRaises(AdapterError):
+            build_command(
+                self.config,
+                "planner",
+                "review",
+                self.home,
+                self.output,
+                project_root=Path("bad\x00path"),
+            )
 
     def test_resume_keeps_policy_and_exact_session(self):
         claude = self.command(session_id="saved-claude")
@@ -135,8 +189,15 @@ class CommandTests(unittest.TestCase):
         for role, adapter in (("planner", "claude"), ("critic", "codex")):
             self.config["adapters"][adapter]["command"] = [str(executable)]
             command = self.command(role, prompt)
-            result = subprocess.run(command, cwd=self.home, stdin=subprocess.DEVNULL,
-                                    capture_output=True, text=True, timeout=5, check=False)
+            result = subprocess.run(
+                command,
+                cwd=self.home,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
             parsed = parse_result(adapter, result.stdout, result.returncode)
             payload = json.loads(parsed["text"])
             self.assertEqual(payload["argv"], command[1:])
@@ -150,9 +211,10 @@ class CommandTests(unittest.TestCase):
 
 class ParserTests(unittest.TestCase):
     def test_claude_success_and_structured_priority(self):
-        self.assertEqual(parse_result("claude", json.dumps(CLAUDE_RESULT, indent=2), 0),
-                         {"text": "review complete", "session_id": "claude-session",
-                          "cost_usd": 0.12})
+        self.assertEqual(
+            parse_result("claude", json.dumps(CLAUDE_RESULT, indent=2), 0),
+            {"text": "review complete", "session_id": "claude-session", "cost_usd": 0.12},
+        )
         for structured in ({"nodes": [], "summary": "café"}, [], "text", None):
             event = {**CLAUDE_RESULT, "structured_output": structured}
             result = parse_result("claude", json.dumps(event), 0)
@@ -160,13 +222,18 @@ class ParserTests(unittest.TestCase):
 
     def test_codex_final_completed_message_and_unknown_cost(self):
         result = parse_result("codex", jsonl(CODEX_EVENTS), 0)
-        self.assertEqual(result, {"text": '{"approved":true}', "session_id": "codex-thread",
-                                  "cost_usd": None})
+        self.assertEqual(
+            result, {"text": '{"approved":true}', "session_id": "codex-thread", "cost_usd": None}
+        )
 
     def test_forward_compatible_events_and_identical_terminal_replay(self):
         for adapter, events in (("claude", [CLAUDE_RESULT]), ("codex", CODEX_EVENTS)):
-            transcript = [{"type": "future.telemetry", "extra": True}, *events, events[-1],
-                          {"type": "future.telemetry"}]
+            transcript = [
+                {"type": "future.telemetry", "extra": True},
+                *events,
+                events[-1],
+                {"type": "future.telemetry"},
+            ]
             self.assertIsInstance(parse_result(adapter, jsonl(transcript), 0)["text"], str)
 
     def test_replayed_completed_item_does_not_replace_final_message(self):
@@ -187,11 +254,18 @@ class ParserTests(unittest.TestCase):
 
     def test_malformed_or_missing_success(self):
         for adapter in ("claude", "codex"):
-            for output in ("", "noise", "{}", "[]", "null", '{"type":1}',
-                           '{"type":"result", "type":"result"}',
-                           '{"type":"future","cost":NaN}', '{"type":"future"}'):
-                with (self.subTest(adapter=adapter, output=output),
-                      self.assertRaises(AdapterError)):
+            for output in (
+                "",
+                "noise",
+                "{}",
+                "[]",
+                "null",
+                '{"type":1}',
+                '{"type":"result", "type":"result"}',
+                '{"type":"future","cost":NaN}',
+                '{"type":"future"}',
+            ):
+                with self.subTest(adapter=adapter, output=output), self.assertRaises(AdapterError):
                     parse_result(adapter, output, 0)
             valid = json.dumps(CLAUDE_RESULT) if adapter == "claude" else jsonl(CODEX_EVENTS)
             for output in (valid + "\nnoise", "noise\n" + valid, valid + '\n{"type":'):
@@ -201,12 +275,21 @@ class ParserTests(unittest.TestCase):
             parse_result("other", json.dumps(CLAUDE_RESULT), 0)
 
     def test_claude_terminal_errors(self):
-        for changes in ({"is_error": True}, {"is_error": 0}, {"is_error": None},
-                        {"subtype": "error_max_budget_usd"}, {"subtype": "error_max_turns"},
-                        {"subtype": "error_during_execution"}, {"subtype": "unknown"},
-                        {"stop_reason": "interrupted"}, {"result": ""}, {"result": {}},
-                        {"session_id": ""}, {"session_id": None}):
-            with (self.subTest(changes=changes), self.assertRaises(AdapterError)):
+        for changes in (
+            {"is_error": True},
+            {"is_error": 0},
+            {"is_error": None},
+            {"subtype": "error_max_budget_usd"},
+            {"subtype": "error_max_turns"},
+            {"subtype": "error_during_execution"},
+            {"subtype": "unknown"},
+            {"stop_reason": "interrupted"},
+            {"result": ""},
+            {"result": {}},
+            {"session_id": ""},
+            {"session_id": None},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(AdapterError):
                 parse_result("claude", json.dumps({**CLAUDE_RESULT, **changes}), 0)
         for key in ("type", "subtype", "is_error", "result", "session_id"):
             event = dict(CLAUDE_RESULT)
@@ -215,7 +298,7 @@ class ParserTests(unittest.TestCase):
                 parse_result("claude", json.dumps(event), 0)
 
     def test_cost_validation(self):
-        for cost in (True, "1.2", -1, float("nan"), float("inf"), 10 ** 400):
+        for cost in (True, "1.2", -1, float("nan"), float("inf"), 10**400):
             with self.subTest(cost=cost), self.assertRaises(AdapterError):
                 parse_result("claude", json.dumps({**CLAUDE_RESULT, "total_cost_usd": cost}), 0)
         for cost in (None, 0, 2, 0.5):
@@ -240,23 +323,49 @@ class ParserTests(unittest.TestCase):
     def test_failure_or_interruption_even_after_success(self):
         for adapter, events in (("claude", [CLAUDE_RESULT]), ("codex", CODEX_EVENTS)):
             for failure in ("error", "turn.failed", "turn.interrupted", "turn.cancelled"):
-                with (self.subTest(adapter=adapter, failure=failure),
-                      self.assertRaises(AdapterError)):
+                with (
+                    self.subTest(adapter=adapter, failure=failure),
+                    self.assertRaises(AdapterError),
+                ):
                     parse_result(adapter, jsonl([*events, {"type": failure}]), 0)
 
     def test_incomplete_and_invalid_codex_sequences(self):
         invalid = [
-            CODEX_EVENTS[:-1], CODEX_EVENTS[1:], [CODEX_EVENTS[0], CODEX_EVENTS[-1]],
+            CODEX_EVENTS[:-1],
+            CODEX_EVENTS[1:],
+            [CODEX_EVENTS[0], CODEX_EVENTS[-1]],
             [*CODEX_EVENTS, {"type": "turn.started"}],
             [*CODEX_EVENTS, CODEX_EVENTS[-2]],
             [CODEX_EVENTS[0], {"type": "item.completed", "item": None}, CODEX_EVENTS[-1]],
-            [CODEX_EVENTS[0], {"type": "item.started", "item": {
-                "id": "x", "type": "agent_message", "text": "partial"}}, CODEX_EVENTS[-1]],
-            [*CODEX_EVENTS[:-1], {"type": "item.completed", "item": {
-                "id": "item_1", "type": "agent_message", "text": "conflict"}}, CODEX_EVENTS[-1]],
-            [*CODEX_EVENTS[:-1], {"type": "item.completed", "item": {
-                "id": "failed", "type": "agent_message", "status": "interrupted",
-                "text": "partial"}}, CODEX_EVENTS[-1]],
+            [
+                CODEX_EVENTS[0],
+                {
+                    "type": "item.started",
+                    "item": {"id": "x", "type": "agent_message", "text": "partial"},
+                },
+                CODEX_EVENTS[-1],
+            ],
+            [
+                *CODEX_EVENTS[:-1],
+                {
+                    "type": "item.completed",
+                    "item": {"id": "item_1", "type": "agent_message", "text": "conflict"},
+                },
+                CODEX_EVENTS[-1],
+            ],
+            [
+                *CODEX_EVENTS[:-1],
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "id": "failed",
+                        "type": "agent_message",
+                        "status": "interrupted",
+                        "text": "partial",
+                    },
+                },
+                CODEX_EVENTS[-1],
+            ],
         ]
         for events in invalid:
             with self.subTest(events=events), self.assertRaises(AdapterError):
