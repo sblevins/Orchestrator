@@ -6,13 +6,22 @@
 
 [roles.critic]
 
-# Select a custom template by safe name, never by a filesystem path.
-# Put private templates in <home>/config/workflows/<name>.json.
+# Use configure_project to save project-local planning.templates in private
+# <home>/config/projects/<project_id>.json; select one with planning.workflow.
+# Select a safe name, never a filesystem path.
+# <home>/config/workflows/<name>.json is administrator-only shared customization,
+# not a destination for project-scoped edits.
 [planning]
+clarification = "material"
 workflow = "plan-review"
 max_review_rounds = 3
 
+# Set trusted/unattended through chat for authorized hands-off project work.
 [execution]
+mode = "restricted"
+unattended = false
+base_ref = "HEAD"
+worker_difficulty = "hard"
 max_parallel = 3
 dependency_failure = "block"
 

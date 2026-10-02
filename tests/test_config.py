@@ -50,7 +50,7 @@ class ConfigurationTests(unittest.TestCase):
             {"provider": "anthropic"},
             {"model": "claude-opus-5-5"},
             {"provider": ""},
-            {"effort": "max"},
+            {"effort": "ultra"},
             {"adapter": "codex"},
         ):
             config = deepcopy(self.defaults)
@@ -114,12 +114,17 @@ class ConfigurationTests(unittest.TestCase):
             {
                 "structure": "graph",
                 "workflow": "plan-review",
+                "clarification": "material",
                 "max_review_rounds": 3,
             },
         )
         self.assertEqual(
             self.defaults["execution"],
             {
+                "mode": "restricted",
+                "unattended": False,
+                "worker_difficulty": "hard",
+                "base_ref": "HEAD",
                 "max_parallel": 3,
                 "dependency_failure": "block",
             },
@@ -142,7 +147,10 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(project["planning"]["workflow"], "project-review")
         self.assertEqual(project["planning"]["max_review_rounds"], 5)
         self.assertEqual(project["planning"]["structure"], "graph")
-        self.assertEqual(project["execution"], {"max_parallel": 2, "dependency_failure": "cancel"})
+        self.assertEqual(
+            project["execution"],
+            {**self.defaults["execution"], "max_parallel": 2, "dependency_failure": "cancel"},
+        )
         self.assertEqual(local["execution"]["max_parallel"], 4)
         # Config selects a name. The graph module owns template loading and validation.
         self.assertFalse((self.home / "config/workflows").exists())

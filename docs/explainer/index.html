@@ -14,18 +14,21 @@
 <header>
 <h1>Fast conversation.<br>Deep specialist work.<br>Reliable project state.</h1>
 <p class="subtitle">A neutral, project-bound coordinator inspired by First Mate, with separate planning, criticism, and ongoing oversight.</p>
+<p>The active bound coordinator can configure its project at any time, with no initial setup seal or operator handoff.
+Scoped writes never modify another project or shared defaults.
+Plain version: ask in this chat to change this project's settings whenever needed, without changing anyone else's settings.</p>
 <p class="note">A public adaptation of the original Lavish research page, preserving its layout, luxury/silk appearance, and architecture diagram.
 The research has been updated to distinguish shipped behavior from future work.</p>
 </header>
 <nav class="top-nav" aria-label="Report sections"><a href="#current">Included now</a><a href="#start">Start</a><a href="#models">Model choices</a><a href="#firstmate">First Mate ideas</a><a href="#graphs">Graphs and plugins</a><a href="#reliability">Reliable tracking</a><a href="#research">Historical research</a></nav>
 <!-- Original research SVG, with its execution gate relabeled for current scope. -->
-<div class="diagram"><svg viewBox="0 0 900 380" role="img" aria-labelledby="diagram-title diagram-description"><title id="diagram-title">Fast interaction and separate specialist agents</title><desc id="diagram-description">The user talks with the fast coordinator. A durable supervisor records tasks and invokes the planner, independent critic, and monitor. Plans require review and permission. Configured workers run as tracked background jobs, with operator authorization and explicit result acceptance. Claude uses native Haiku watchers; Pi uses local no-LLM observers in its installed sub-agent menu.
+<div class="diagram"><svg viewBox="0 0 900 380" role="img" aria-labelledby="diagram-title diagram-description"><title id="diagram-title">Fast interaction and separate specialist agents</title><desc id="diagram-description">The user talks with the fast coordinator. A durable supervisor records tasks and invokes the planner, independent critic, and monitor. Plans require review and permission. Configured workers run as tracked background jobs, with project-configured permissions and explicit authorized result acceptance. Claude uses native Haiku watchers; Pi uses local no-LLM observers in its installed sub-agent menu.
 Stopping an observer does not cancel the actual worker.</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker></defs>
 <g id="interaction" fill="none" stroke="currentColor" stroke-width="1.5"><title>User interaction remains responsive</title><rect x="20" y="20" width="150" height="66" rx="10"/><rect x="250" y="20" width="270" height="66" rx="10"/><rect x="620" y="20" width="260" height="66" rx="10"/><path d="M175 53 H245" marker-end="url(#arrow)"/><path d="M525 53 H615" marker-end="url(#arrow)"/></g>
 <g text-anchor="middle" font-size="20"><text x="95" y="60">You</text><text x="385" y="49">Fast coordinator</text><text x="385" y="71" font-size="14">clarify · delegate · explain</text><text x="750" y="49">Durable supervisor</text><text x="750" y="71" font-size="14">save · dispatch · recover</text></g>
 <g id="specialists" fill="none" stroke="currentColor" stroke-width="1.5"><title>Specialists operate as tracked tasks</title><path d="M750 90 V122 H165 V165" marker-end="url(#arrow)"/><path d="M450 122 V165" marker-end="url(#arrow)"/><path d="M750 122 V165" marker-end="url(#arrow)"/><rect x="35" y="170" width="260" height="70" rx="10"/><rect x="320" y="170" width="260" height="70" rx="10"/><rect x="620" y="170" width="260" height="70" rx="10"/></g>
 <g text-anchor="middle" font-size="20"><text x="165" y="201">Powerful planner</text><text x="165" y="222" font-size="14">design + alternatives</text><text x="450" y="201">Independent critic</text><text x="450" y="222" font-size="14">check plan + implications</text><text x="750" y="201">Slow monitor</text><text x="750" y="222" font-size="14">observe + submit corrections</text></g>
-<g id="execution-gate" fill="none" stroke="currentColor" stroke-width="1.5"><title>Operator authorization and worker result acceptance gate</title><path d="M165 245 V280 H450 V307" marker-end="url(#arrow)"/><path d="M450 245 V280"/><path d="M750 245 V280 H450" stroke-dasharray="5 5"/><rect x="190" y="312" width="520" height="52" rx="10"/></g><text x="450" y="344" text-anchor="middle" font-size="19">Plan approval · workers · result acceptance</text>
+<g id="execution-gate" fill="none" stroke="currentColor" stroke-width="1.5"><title>Project-scoped approval and explicit worker result acceptance</title><path d="M165 245 V280 H450 V307" marker-end="url(#arrow)"/><path d="M450 245 V280"/><path d="M750 245 V280 H450" stroke-dasharray="5 5"/><rect x="190" y="312" width="520" height="52" rx="10"/></g><text x="450" y="344" text-anchor="middle" font-size="19">Plan approval · workers · result acceptance</text>
 </svg><div class="mobile-flow"><strong>You → fast coordinator → durable supervisor</strong><p>The supervisor tracks the planner, independent critic, and slow monitor.</p><p>Plans require review and approval. Worker results require explicit acceptance.</p></div><p class="note">Plain version: the quick model keeps talking with you, stronger models design and check the work, and approved workers prepare changes for you to review.</p></div>
 <section id="current">
 <h2>Bottom line: durable planning and gated workers</h2>
@@ -33,17 +36,17 @@ Stopping an observer does not cancel the actual worker.</desc><defs><marker id="
 It saves project state, runs independent planning and criticism, and supervises a slow background monitor.
 It is not a Temporal deployment or a third-party Pi orchestration plugin.</p>
 <blockquote><p><strong>Worker routing and worker execution are enabled, with no worker model defaults.</strong>
-Ask the coordinator to finish initial setup; it can create and validate <code>.orchestrator/crew-dispatch.json</code> using worker preferences you choose, without a shell-command handoff.
-An untracked regular policy file alone does not block write-worker preparation.
-Missing or invalid policy blocks dispatch; enabling the feature does not authorize writes or accept results.</p></blockquote>
+Ask the coordinator to draft, update, or repair <code>.orchestrator/crew-dispatch.json</code> with repeatable <code>setup_project</code> calls using worker preferences you choose.
+An ordinary routing policy file is control metadata: untracked, tracked, or staged policy-only changes do not block write-worker preparation; unrelated source changes still do.
+Missing or invalid policy blocks dispatch; saving policy does not launch, approve, or accept work.</p></blockquote>
 <p>Plain version: the quick model talks with you, stronger models design and check the work, and software remembers the jobs.
-Workers can prepare changes, but you decide whether to accept them.</p>
+Workers prepare candidates; checked acceptance uses an authorized decision or standing project authorization.</p>
 <div class="table-wrap"><table>
 <caption>Current implementation and remaining boundaries</caption>
 <thead><tr><th scope="col">Area</th><th scope="col">Implemented now</th><th scope="col">Not implemented</th></tr></thead>
 <tbody>
-<tr><th scope="row">Planning</th><td>Planner-to-critic handoff, graph validation/readiness, bounded revisions, blocking findings, explicit operator approval</td><td>Automatic acceptance of worker results</td></tr>
-<tr><th scope="row">Workers</th><td>Policy-checked selection, durable jobs plus frontend-specific native observers, isolated write worktrees, signed local candidates, explicit acceptance</td><td>Guaranteed Pi FleetView/live partial text, worker shell or test execution, automatic merge or push, worker tabs or windows</td></tr>
+<tr><th scope="row">Planning</th><td>Planner-to-critic handoff, graph validation/readiness, bounded revisions, configurable monitor holds, project-scoped explicit approval APIs</td><td>Acceptance without project authorization or satisfied live gates</td></tr>
+<tr><th scope="row">Workers</th><td>Policy-checked selection, durable jobs plus frontend-specific native observers, isolated write worktrees, signed local candidates, explicit acceptance</td><td>Guaranteed Pi FleetView/live partial text, OS sandboxing of trusted commands, automatic merge or push, worker tabs or windows</td></tr>
 <tr><th scope="row">Project memory</th><td>Canonical project roots, private notes with revision checks, one active coordinator, observer sessions and explicit takeover</td><td>Distributed ownership across machines</td></tr>
 <tr><th scope="row">Supervision</th><td>Detached runners, deadlines, cancellation, process identity checks, saved events, restart reconciliation</td><td>Installed boot service or automatic recovery from every host failure</td></tr>
 <tr><th scope="row">Integration</th><td>Native Claude hooks/MCP and an owned Pi extension over the same state</td><td>Automatic third-party plugin installation, visual graph editor, automatic shipping</td></tr>
@@ -67,7 +70,9 @@ No Python runtime dependencies need installing.</p>
 Pi selects the configured orchestrator role automatically.
 Native Claude respects its own CLI and settings precedence, so a global wrapper or model pin can override the repository's Sonnet/low foreground preference.
 Use Claude's <code>/model</code> and <code>/effort</code>, or the optional <code>bin/orchestrator start</code> launcher, to apply your desired foreground settings.
-Background roles use Orchestrator's TOML configuration.</p>
+Background roles use Orchestrator's merged project configuration.
+Use <code>project_settings</code> and repeatable <code>configure_project</code> calls to save settings and project-local <code>planning.templates</code> in private <code>&lt;home&gt;/config/projects/&lt;bound-id&gt;.json</code>, never another project or shared settings.
+Select a template with <code>planning.workflow</code>; shared home workflow files are administrator-only customization.</p>
 <p>Plain version: starting Claude normally may keep the model you already chose for Claude.
 That does not change which models this project uses for background planning and checking.</p>
 <p>See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/frontends.md">frontend setup</a> and <a href="https://github.com/sblevins/Orchestrator/blob/main/README.md">the repository guide</a> for project registration, observer mode, and takeover.</p>
@@ -86,32 +91,48 @@ Model identifiers request a configuration; they do not prove availability throug
 <tr data-role="monitor"><th scope="row">Slow monitor</th><td>Claude adapter · Opus 5.5<br><code>claude-opus-5-5</code></td><td>high</td><td>Review consequential decisions and surface corrections</td></tr>
 </tbody></table></div>
 <p>Use a family such as <code>Opus</code> or <code>Fable</code> to follow its supported release, or a full model ID to request an exact version.
+Pi also supports <code>Astra</code> and <code>Sol</code> within the installed provider catalog, with exact IDs taking precedence.
+Pi worker <code>max-supported</code> selects the highest supported effort for the selected model.
 Existing defaults remain pinned.
 See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/configuration.md#model-families-or-exact-versions">family resolution and catalog limits</a>.</p>
 <p><strong>Fable is only an alternative for future deep-audit evaluation, not a default.</strong>
 There are no worker model defaults.
 Workers and routing are enabled, but no dispatch profiles are populated for you.
-The slow monitor selects plan work; the foreground orchestrator selects unrelated work.
+The bound coordinator selects both planned and on-demand work.
+For classification routes, the router supplies configured models while the coordinator chooses difficulty or exact effort.
+Monitor classification suggestions are recommendations unless unattended authorization permits selection using configured profile effort or <code>execution.worker_difficulty</code>.
+Legacy monitor selections remain supported for supplied pending plan requests.
+Read-only comparison teams use 2 to 8 distinct models in two rounds: independent investigation, then comparison of all first-round reports.
+Peers can also exchange live durable messages through <code>send_team_message</code> and <code>read_team_messages</code>; these are untrusted data, not instructions or new permissions.
 Claude Code executes only Anthropic models; the owned Pi SDK bridge executes other models.
 Exact model and effort validation rejects unsupported requests without silent fallback.
 Pi tasks are fresh and ephemeral, with no resume.</p>
-<p>Tracked settings live in <code>config/default.toml</code>; private overrides live in <code>config/local.toml</code> and <code>config/projects/PROJECT_ID.toml</code>.
+<p>Plain version: the saved policy names the workers, and the coordinator chooses how difficult the task is or how much effort to request.
+For a comparison, each worker investigates first, then checks everyone's reports without changing files.</p>
+<p>Tracked settings live in <code>config/default.toml</code>; private overrides live in <code>&lt;home&gt;/config/local.toml</code>, <code>&lt;home&gt;/config/projects/PROJECT_ID.toml</code>, and finally <code>&lt;home&gt;/config/projects/PROJECT_ID.json</code>.
+Conversational <code>configure_project</code> writes only the bound project's private JSON override, not shared defaults or another project.
 Each role configures its adapter, model, and effort.
 Shared supervisor timeouts and resource reservations protect the machine without requiring separate limits for every role.
 There is no enforced dollar spending cap.
 See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/configuration.md">configuration</a> for the supported fields.</p>
-<p>Worker tools provide reading and permitted file edits only, with no shell or tests.
-These tool restrictions are not an operating-system sandbox.
+<p>Guarded workers have file tools only.
+<code>execution.mode = "trusted"</code> enables native foreground tools and owned worker <code>run_command</code> for commands and tests.
+Trusted commands are not an operating-system sandbox and can act outside file-tool path restrictions.
+<code>execution.base_ref</code> selects the Git branch for worker checkouts, not a directory.
 Pi reuses the canonical auth path without inherited plugins, skills, or project settings.
 Quota-dependent candidate arrays and floors fail closed because a supported quota evidence adapter is unavailable.
 Plain version: if required quota information cannot be checked, no worker is chosen from that policy.</p>
 <h3>Four roles for planning, two ongoing roles</h3>
-<p>The planner and critic run as temporary specialists during planning and substantial replanning.
+<p>Clarify material unknowns before a paid planner call, then obtain independent final review.
+<code>retry_review</code> retries an eligible failed critic using the saved draft without rerunning the planner; unknown outcomes are not blindly replayed.
+The planner and critic run as temporary specialists during planning and substantial replanning.
 The fast orchestrator and slow monitor remain the ongoing roles.
 The monitor is an event-driven role, not a model continuously generating text.</p>
 <p>Every user prompt is saved for review.
 Exact routine status questions do not wake an expensive monitor call, but ambiguous or consequential requests do.
-The orchestrator can request extra scrutiny; it cannot veto the program's required reviews.</p>
+The orchestrator can request extra scrutiny; it cannot veto the program's required reviews.
+The monitor waits for foreground completion and <code>monitoring.quiet_seconds</code>, 20 by default.
+Only blocking monitor findings interject; informational and warning findings remain silent.</p>
 <p>Plain version: you can ask for progress without starting another deep review.
 Important new requests are saved and checked in the background.</p>
 <h3>Why split the roles?</h3>
@@ -136,13 +157,13 @@ This is an independent implementation, not an official First Mate project; no Fi
 <tr><th scope="row">Conservative status</th><td>Unknown outcomes stay visible; no blind replay</td><td>Does not promise exactly-once external effects</td></tr>
 <tr><th scope="row">Knowledge curation</th><td>Private project notes with revision checks, separated from runtime facts</td><td>No added knowledge-graph infrastructure</td></tr>
 <tr><th scope="row">Cheap monitoring</th><td>Software polling plus bounded model reviews, cooldowns and review cursors</td><td>Not a complete successor-rearming supervision host</td></tr>
-<tr><th scope="row">Dispatch profiles</th><td>Project policy: monitor selects plan workers; orchestrator selects unrelated workers</td><td>No default workers; unavailable quota evidence blocks arrays and floors</td></tr>
+<tr><th scope="row">Dispatch profiles</th><td>Project policy: coordinator selects planned and on-demand workers; classification routes supply models, coordinator supplies difficulty or effort; read-only teams compare 2 to 8 models in two rounds</td><td>No default workers; unavailable quota evidence blocks arrays and floors</td></tr>
 </tbody></table></div>
 <p>The current source audit uses First Mate revision <code>8f756bbc287c5bdfacc64a7cc09e8516c64fc919</code>.
 It corrects the original research: First Mate already supports a Claude primary with persistent headless supervision, and its wake queue has actor-scoped, generation-aware and unread-outcome recovery.
 The earlier wake-drain concern is not a current finding.</p>
-<p>We intentionally exclude the pirate persona, terminal keystroke injection, implicit approval, unrestricted specialist shell tools, and silent model fallback.</p>
-<p>Plain version: keep the saved records and careful supervision, without copying every automation or giving models permission to approve their own work.</p>
+<p>We intentionally exclude the pirate persona, terminal keystroke injection, implicit approval, unrestricted core-specialist shell tools, and silent model fallback.</p>
+<p>Plain version: saved project permission rules determine when completed work can be accepted.</p>
 <p>Read the <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/firstmate-coverage.md">coverage map</a> and <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/research/firstmate-audit.md">feature-family audit</a> for adopt/defer/reject decisions.</p>
 </section>
 <section id="graphs">
@@ -173,7 +194,7 @@ See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/worker-visi
 <ul>
 <li>Save task intent and durable events; identify attempts and actual processes before accepting results.</li>
 <li>Keep notifications until explicitly acknowledged, and redeliver after reconnect.</li>
-<li>Validate dependency graphs, enforce review holds, and reserve approval for explicit operator commands.</li>
+<li>Validate dependency graphs and apply live project permissions, with explicit authorized decisions through bound conversational APIs or optional operator CLI.</li>
 <li>Separate private project knowledge from live runtime state; use revision checks when changing notes.</li>
 <li>Apply deadlines, cancellation, bounded review rounds and machine resource reservations outside the model.</li>
 <li>Reconcile unfinished work after restart, preserving uncertainty instead of silently replaying it.</li>
@@ -187,13 +208,21 @@ Read-only harness settings are not protection against hostile programs sharing t
 <p>Offline tests exercise real subprocesses with fake model harnesses, graph constraints, session reconnection and recovery boundaries.
 They do not establish paid model access, answer quality, native microphone behavior, or live Claude idle wakeup.
 Harness-reported costs are not verified per-turn spending totals.</p>
-<p>Operator plan approval authorizes its declared write nodes; unrelated writes and policy-required approvals need an explicit worker approval.
+<p>Project permission defaults are <code>coordinator_approvals=true</code>, <code>require_write_approval=false</code>, and <code>enforce_monitor_holds=true</code>.
+Change them conversationally with <code>configure_project</code>; current project permissions remain live controls.
+Authorized decisions use bound <code>approve_plan</code>, <code>resolve_hold</code>, <code>approve_worker</code>, <code>accept_worker</code>, and <code>approve_node</code> APIs, or the optional operator CLI.
+Plan approval still requires independent review and fresh monitor evidence; routing rules may require explicit write approval even when the project default does not.
 A successful worker produces a candidate, not an accepted graph result.
-Explicit operator acceptance unlocks dependent work; nothing automatically merges into the source branch or pushes.
-Plain version: finishing a job does not mean its changes are approved.
-You review the result before later jobs may rely on it.</p>
+Checked acceptance unlocks dependent work; only a comparison team's parent request can be accepted, and nothing automatically merges into the source branch or pushes.
+<code>execution.unattended = true</code> supplies standing project authorization to approve reviewed plans and accept candidates with an explicit empty <code>remaining_issues</code> list and satisfied live gates.
+Explicit worker approval required by policy, including security-audit teams, is still required.
+Plain version: you can authorize routine progress in advance, but unresolved problems and required worker approval still stop it.</p>
+<p>Explicit image generation uses the separately billed OpenAI Images API with <code>OPENAI_API_KEY</code>, not subscription OAuth.
+Project <code>images.enabled</code> defaults to false; supported outputs are PNG and JPEG.
+Plain version: images need separate permission and an API key, and they cost extra.</p>
+<p>These helper integrations are undergoing offline validation; paid provider access has not been verified, and the running deployment has not yet been activated on these changes.</p>
 <p>The next step is configuring chosen worker profiles and verifying live model access and native frontend behavior.
-See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/workers.md">worker setup and acceptance</a> for the operator commands and current limits.</p>
+See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/workers.md">worker setup and acceptance</a> for conversational controls, optional operator commands, and current limits.</p>
 </section>
 <section id="research" class="appendix">
 <h2>Historical research and source notes</h2>

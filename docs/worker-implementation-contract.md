@@ -14,7 +14,8 @@ Support named classifications containing one profile or a read-only comparison t
 The coordinator interprets classification and difficulty; legacy natural-language rules are best-fit guidelines, not keyword matches or a separate routing model.
 The bound coordinator may select planned and on-demand workers while preserving project, plan, node, and original user-event identities.
 The monitor may select only supplied pending legacy plan requests through its accepted result.
-Classification suggestions become `worker.routing_recommended` notifications rather than executable selections or failed monitor reviews; final effort remains the coordinator's decision.
+Without unattended authorization, classification suggestions become `worker.routing_recommended` notifications and final effort remains the coordinator's decision.
+With unattended authorization, classification recommendations can select pending planned workers using configured profile effort or `execution.worker_difficulty`, never model-invented effort.
 Explicit policy-match overrides remain a separate CLI-only capability, never a model-supplied authority label.
 Plain version: preserve who requested the work and which plan it belongs to, while letting the coordinator choose its configured workers.
 
@@ -25,13 +26,16 @@ Legacy quota-dependent arrays require trusted evidence and are not comparison te
 Classification difficulty mappings and supported profile schemas are documented in [project routing](project-routing.md#classifications-and-difficulty).
 
 Read workers are read-only; write workers edit only isolated Git worktrees, never the source checkout.
-Both harnesses expose controlled file tools, not unrestricted shell or unreviewed extensions.
+Guarded workers expose controlled file tools; trusted workers additionally expose owned `run_command` for unsandboxed command and test execution.
+File-tool path containment does not constrain arbitrary trusted commands.
 These controls are not an operating-system sandbox against hostile same-user processes.
 There is no automatic merge or push.
 Permissions default to conversational coordinator approvals enabled, general write approval not required, and monitor holds enforced; these are project-local configurable preferences.
 A routing rule's explicit approval requirement and policy-match overrides still require approval.
 Plan approval still requires independent review and fresh monitor evidence.
 Successful execution produces a candidate, not accepted completion; checked acceptance releases dependencies.
+Standing `execution.unattended` authorization approves reviewed plans and accepts candidates only with an explicit empty `remaining_issues` list and satisfied live gates.
+It never supplies explicit worker approval required by policy, including security-audit teams.
 Approval nodes cannot launch workers, and failed prerequisites block or cancel dependents according to configuration.
 Unknown outcomes are never automatically replayed.
 
@@ -79,7 +83,8 @@ Monitor result processing validates supplied request context and atomically acce
 Language meaning still requires judgment; software cannot prove arbitrary prose is unrelated work.
 
 Teams use ordinary durable child requests for two rounds over the same frozen Git commit and accepted dependencies.
-Round two receives complete untrusted round-one reports rather than instructions or a real-time peer conversation.
+Round two receives complete untrusted round-one reports, never new instructions or permissions.
+Live durable `send_team_message` and `read_team_messages` tools also permit registered peers to exchange untrusted data during active attempts.
 Normal concurrency and resource limits apply, so four peers produce eight jobs, not eight simultaneous processes.
 Only parent acceptance can release the associated graph node; children cannot independently authorize completion.
 Cancellation applies to the parent and children, with terminal confirmation and no blind replay of uncertain outcomes.
@@ -94,7 +99,8 @@ Reports have the strict shape `{summary: string, changes: [string], checks: [str
 Report claims do not independently prove tests passed.
 
 Expose project-scoped setup/settings, policy inspection, request/get/list, planned and on-demand selection, refresh, approvals, acceptance, and cancellation through the common API/MCP/Pi bridge.
-Keep foreground tool guards: no shell, direct source writes, untracked implementation agents, or arbitrary executable replacement.
+Keep foreground tool guards in guarded mode; trusted mode explicitly enables native foreground tools.
+Conversational configuration cannot replace adapter/frontend executables.
 Native observers display already dispatched workers and team children without owning execution or opening Herder windows.
 Project ownership, dependency correctness, source isolation, credential limits, and no unknown-outcome retry remain intrinsic boundaries even when optional gates are disabled.
 Plain version: the coordinator can make authorized decisions in chat, but every worker stays tracked and every accepted result still needs evidence.

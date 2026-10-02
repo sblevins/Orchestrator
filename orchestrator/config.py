@@ -22,7 +22,7 @@ CORE_ROLES = ("orchestrator", "planner", "critic", "monitor")
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "default.toml"
 ADAPTER_EFFORTS = {
     "claude": {"low", "medium", "high", "xhigh", "max"},
-    "pi": {"off", "minimal", "low", "medium", "high", "xhigh"},
+    "pi": {"off", "minimal", "low", "medium", "high", "xhigh", "max"},
 }
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep"}
 SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
@@ -80,7 +80,7 @@ def _command(value, context):
         _fail(f"{context} contains a forbidden permission bypass")
 
 
-def validate_executor(settings: dict, context="profile") -> None:
+def validate_executor(settings: dict, context="profile", *, allow_effort_selector=False) -> None:
     """Keep the requested provider on its configured harness, without fallback."""
     adapter = settings.get("adapter", settings.get("harness"))
     model = settings.get("model")
@@ -102,9 +102,11 @@ def validate_executor(settings: dict, context="profile") -> None:
             _fail(f"{context}: use Claude Code for Anthropic models, not Pi")
     else:
         _fail(f"{context}: use claude for Anthropic models or pi with an explicit provider")
-    if (
-        not isinstance(settings.get("effort"), str)
-        or settings["effort"] not in ADAPTER_EFFORTS[adapter]
+    if not isinstance(settings.get("effort"), str) or (
+        settings["effort"] not in ADAPTER_EFFORTS[adapter]
+        and not (
+            allow_effort_selector and adapter == "pi" and settings["effort"] == "max-supported"
+        )
     ):
         _fail(f"{context}.effort is unsupported by {adapter}; no silent effort downgrade")
 
@@ -120,6 +122,25 @@ def validate_config(config: dict) -> None:
             _fail("permissions supports only: " + ", ".join(sorted(choices)))
         if any(type(value) is not bool for value in permissions.values()):
             _fail("permissions settings must be booleans")
+    if "images" in config:
+        images = _table(config, "images")
+        allowed_image_fields = {"enabled", "model", "size", "quality", "output_format"}
+        if set(images) != allowed_image_fields or type(images.get("enabled")) is not bool:
+            _fail(
+                "images requires enabled, model, size, quality and output_format; credentials belong in OPENAI_API_KEY, not project settings"
+            )
+        _text(images.get("model"), "images.model")
+        if images["model"].startswith("-") or any(
+            character.isspace() or ord(character) < 32 for character in images["model"]
+        ):
+            _fail("images.model must be one exact image-model identifier")
+        for field, choices in {
+            "size": {"auto", "1024x1024", "1536x1024", "1024x1536"},
+            "quality": {"auto", "low", "medium", "high"},
+            "output_format": {"png", "jpeg"},
+        }.items():
+            if not isinstance(images.get(field), str) or images[field] not in choices:
+                _fail(f"images.{field} must be one of: {', '.join(sorted(choices))}")
     supervisor = _table(config, "supervisor")
     for key in ("poll_seconds", "heartbeat_seconds", "stale_seconds", "monitor_interval_seconds"):
         _number(supervisor.get(key), f"supervisor.{key}", 0.1, 86400)
@@ -156,12 +177,48 @@ def validate_config(config: dict) -> None:
             except (ValueError, TypeError) as error:
                 _fail(f"planning.templates.{name}: {error}")
     _number(planning.get("max_review_rounds"), "planning.max_review_rounds", 1, 100, True)
+    if planning.get("clarification", "material") not in ("material", "always", "none"):
+        _fail("planning.clarification must be material, always or none")
     execution = _table(config, "execution")
+    if execution.get("mode", "restricted") not in ("restricted", "trusted"):
+        _fail("execution.mode must be restricted or trusted")
+    if type(execution.get("unattended", False)) is not bool:
+        _fail("execution.unattended must be a boolean standing project authorization")
+    if execution.get("worker_difficulty", "hard") not in ("easy", "hard", "very-hard"):
+        _fail("execution.worker_difficulty must be easy, hard or very-hard")
+    base_ref = execution.get("base_ref", "HEAD")
+    if (
+        not isinstance(base_ref, str)
+        or not base_ref.strip()
+        or len(base_ref) > 256
+        or base_ref.startswith("-")
+        or any(ord(character) < 32 for character in base_ref)
+    ):
+        _fail(
+            "execution.base_ref must be an existing Git ref or commit, such as crosschain/integration"
+        )
+    if "commands" in config:
+        commands = _table(config, "commands")
+        if set(commands) - {"enabled", "sandbox", "network", "timeout_seconds", "tool_paths"}:
+            _fail("commands supports enabled, sandbox, network, timeout_seconds and tool_paths")
+        for flag, default in (("enabled", False), ("sandbox", True), ("network", False)):
+            if type(commands.get(flag, default)) is not bool:
+                _fail(f"commands.{flag} must be a boolean")
+        _number(commands.get("timeout_seconds", 300), "commands.timeout_seconds", 1, 900, True)
+        paths = commands.get("tool_paths", {})
+        if not isinstance(paths, dict) or len(paths) > 64:
+            _fail("commands.tool_paths must map at most 64 executable names to absolute paths")
+        for name, path in paths.items():
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", name):
+                _fail("commands.tool_paths keys must be executable basenames")
+            if not isinstance(path, str) or not Path(path).is_absolute() or "\x00" in path:
+                _fail(f"commands.tool_paths.{name} must be an absolute executable path")
     _number(execution.get("max_parallel"), "execution.max_parallel", 1, 64, True)
     if execution.get("dependency_failure") not in ("block", "cancel"):
         _fail("execution.dependency_failure must be block or cancel")
     if "monitoring" in config:
         monitoring = _table(config, "monitoring")
+        _number(monitoring.get("quiet_seconds", 20), "monitoring.quiet_seconds", 0, 600)
         if type(monitoring.get("review_every_prompt")) is not bool:
             _fail("monitoring.review_every_prompt must be a boolean")
         routine = monitoring.get("routine_prompts")

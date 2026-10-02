@@ -1,14 +1,17 @@
-"""Owned Pi launcher and descriptor-relative file broker, never a shell executor.
+"""Owned Pi launcher and descriptor-relative file broker with explicit owned tools.
 
 This limits model tools, not other same-user processes or the Pi process itself.
 """
 
 import contextlib
 import fnmatch
+import hashlib
+import importlib.util
 import itertools
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -38,6 +41,10 @@ WRITE_TOOLS = {"edit", "write"}
 
 class PolicyError(ValueError):
     """The request exceeds the broker's authority."""
+
+
+class AuthorityError(PolicyError):
+    """A request explicitly attempts to exceed the configured file roots."""
 
 
 class UnsupportedTextFile(PolicyError):
@@ -76,8 +83,18 @@ def plain_directory(path):
         raise
 
 
-def forbidden(part):
+def forbidden(part, write=False, trusted=False):
     normalized = part.lower()
+    if trusted:
+        return (
+            normalized in (CONTROL_NAMES - {"agents", "claude"})
+            or normalized
+            in {".git", ".orchestrator", ".ssh", ".aws", ".gnupg", ".npmrc", ".pypirc", ".netrc"}
+            or normalized.startswith((".env", "credentials.", "secrets."))
+            or normalized.endswith((".pem", ".key", ".p12", ".pfx"))
+        )
+    if not write and normalized in {"agents.md", "claude.md"}:
+        return False
     return (
         part.startswith(".")
         or normalized in CONTROL_NAMES
@@ -101,6 +118,11 @@ class FileBroker:
         self.cwd = Path(os.path.abspath(options["cwd"]))
         self.project = Path(os.path.abspath(options.get("project_root") or self.cwd))
         self.mode = options["mode"]
+        self.trusted = options.get("trusted") is True
+        self.commands = options.get("commands")
+        self.worker_context = options.get("worker_context")
+        self.images = options.get("images", {})
+        self.image_state_directory = options.get("image_state_directory")
         if self.mode not in ("read", "write"):
             raise PolicyError("invalid tool mode")
         if self.mode == "write" and (
@@ -111,7 +133,7 @@ class FileBroker:
             raise PolicyError("write worktree must be separate from source checkout")
         # Review tasks run from private supervisor directories. Those directories
         # contain task metadata, not model-readable project material.
-        if self.mode == "read":
+        if self.mode == "read" and self.worker_context is None:
             self.cwd = self.project
         self.roots = {}
         try:
@@ -131,20 +153,29 @@ class FileBroker:
             raise PolicyError("invalid tool path")
         supplied = Path(value)
         if ".." in supplied.parts:
-            raise PolicyError("parent traversal is forbidden")
+            raise AuthorityError("parent traversal is forbidden")
         absolute = supplied if supplied.is_absolute() else self.cwd / supplied
+        if self.trusted:
+            # Resolve ordinary project aliases, then recheck the resolved root and path policy.
+            # Restricted mode retains no-follow traversal throughout.
+            try:
+                absolute = absolute.resolve(strict=False)
+            except (OSError, RuntimeError) as error:
+                raise PolicyError(
+                    "Cannot resolve this project path; check for a symlink loop"
+                ) from error
         candidates = [self.cwd] if write else sorted(self.roots, key=lambda item: -len(item.parts))
         for root in candidates:
             try:
                 relative = absolute.relative_to(root)
             except ValueError:
                 continue
-            if any(forbidden(part) for part in relative.parts):
-                raise PolicyError("control files and hidden paths are forbidden")
+            if any(forbidden(part, write=write, trusted=self.trusted) for part in relative.parts):
+                raise AuthorityError("control files and hidden paths are forbidden")
             if write and (self.mode != "write" or not relative.parts):
-                raise PolicyError("write permission denied")
+                raise AuthorityError("write permission denied")
             return root, relative.parts
-        raise PolicyError("path is outside allowed roots")
+        raise AuthorityError("path is outside allowed roots")
 
     @contextlib.contextmanager
     def directory(self, root, parts, create=False):
@@ -221,6 +252,111 @@ class FileBroker:
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(temporary, dir_fd=parent)
 
+    def prepare_image(self, value, image_format):
+        """Validate the exact destination before making a billable provider request."""
+        root, parts = self.locate(value, write=True)
+        suffixes = {"png": {".png"}, "jpeg": {".jpg", ".jpeg"}}
+        if not parts or Path(parts[-1]).suffix.lower() not in suffixes.get(image_format, set()):
+            raise PolicyError("Image destination suffix must match png or jpeg format")
+        with self.directory(root, parts[:-1], create=True) as directory:
+            try:
+                os.stat(parts[-1], dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                return root, parts
+            raise PolicyError("Image destination already exists; choose a new output path")
+
+    def save_image(self, target, content):
+        """Publish only owned-provider image bytes, never a caller-supplied binary tool."""
+        root, parts = target
+        # Revalidate authority even if another in-process caller manufactured a target.
+        checked_root, checked_parts = self.locate(str(root.joinpath(*parts)), write=True)
+        if checked_root != root or checked_parts != parts or not parts:
+            raise PolicyError("Image destination changed")
+        if not isinstance(content, bytes) or not 1 <= len(content) <= 16 * MAX_BYTES:
+            raise PolicyError("Generated image exceeds the 16 MiB artifact limit")
+        with self.directory(root, parts[:-1]) as directory:
+            temporary = ".orchestrator-image-" + os.urandom(12).hex()
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory,
+            )
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                # No-clobber publication also rejects symlinks and targets created in flight.
+                os.link(
+                    temporary,
+                    parts[-1],
+                    src_dir_fd=directory,
+                    dst_dir_fd=directory,
+                    follow_symlinks=False,
+                )
+                os.fsync(directory)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(temporary, dir_fd=directory)
+        return {
+            "path": "/".join(parts),
+            "bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+
+    def verify_image(self, artifact):
+        try:
+            root, parts = self.locate(artifact["path"], write=True)
+            with self.directory(root, parts[:-1]) as directory:
+                descriptor = os.open(
+                    parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                )
+                with os.fdopen(descriptor, "rb") as stream:
+                    metadata = os.fstat(stream.fileno())
+                    if (
+                        not stat.S_ISREG(metadata.st_mode)
+                        or metadata.st_nlink != 1
+                        or metadata.st_size != artifact["bytes"]
+                        or metadata.st_size > 16 * MAX_BYTES
+                    ):
+                        return False
+                    return (
+                        hashlib.sha256(stream.read(16 * MAX_BYTES + 1)).hexdigest()
+                        == artifact["sha256"]
+                    )
+        except (ValueError, OSError, KeyError, TypeError):
+            return False
+
+    def generate_image(self, arguments):
+        if self.mode != "write" or self.images.get("enabled") is not True:
+            raise PolicyError("Image generation must be enabled for a write worker")
+        state = Path(self.image_state_directory or "")
+        if not state.is_absolute() or any(
+            state == root or root in state.parents or state in root.parents for root in self.roots
+        ):
+            raise PolicyError("Image request state must be outside model-accessible roots")
+        image_module = owned_module("images")
+        if self.worker_context is not None:
+            owned_module("worker_mcp").check_worker(self.worker_context)
+        # Absolute and relative names for the same output share one billing intent.
+        _, image_parts = self.locate(arguments.get("path", ""), True)
+        arguments = {**arguments, "path": str(Path(*image_parts))}
+        try:
+            result = image_module.generate_image(
+                self.images, arguments, self, state, os.environ.get("OPENAI_API_KEY")
+            )
+        except image_module.ImageError as error:
+            # Provider/configuration problems are reported to the worker, not disguised
+            # as a forbidden tool or a successful generated artifact.
+            result = {
+                "status": "failed",
+                "message": str(error),
+                "code": getattr(error, "code", "image_generation_failed"),
+                "ambiguous": bool(getattr(error, "ambiguous", False)),
+            }
+        return json.dumps(result, ensure_ascii=True, allow_nan=False)
+
     def walk(self, root, parts):
         pending = [parts]
         visited = 0
@@ -232,7 +368,7 @@ class FileBroker:
                     visited += 1
                     if visited > MAX_VISITED:
                         raise PolicyError("directory scan exceeds limit")
-                    if forbidden(entry.name):
+                    if forbidden(entry.name, trusted=self.trusted):
                         continue
                     metadata = entry.stat(follow_symlinks=False)
                     child = (*current, entry.name)
@@ -242,6 +378,22 @@ class FileBroker:
                         yield child
 
     def execute(self, name, arguments):
+        if not isinstance(arguments, dict):
+            raise PolicyError("tool arguments must be an object")
+        if name == "run_command":
+            owned_module("worker_mcp").check_worker(self.worker_context or {})
+            if not self.commands:
+                raise PolicyError("Command configuration is missing")
+            result = owned_module("commands").run_command(self.commands, arguments)
+            return json.dumps(result, ensure_ascii=True, allow_nan=False)
+        if name in {"send_team_message", "read_team_messages"}:
+            context = self.worker_context or {}
+            result = owned_module("team_messages").execute(
+                context["home"], context["task_id"], context["token"], name, arguments
+            )
+            return json.dumps(result, ensure_ascii=True, allow_nan=False)
+        if name == "generate_image":
+            return self.generate_image(arguments)
         allowed = READ_TOOLS | (WRITE_TOOLS if self.mode == "write" else set())
         if name not in allowed or not isinstance(arguments, dict):
             raise PolicyError("forbidden tool")
@@ -284,7 +436,7 @@ class FileBroker:
                 for index, entry in enumerate(entries):
                     if index >= MAX_VISITED:
                         raise PolicyError("directory scan exceeds limit")
-                    if forbidden(entry.name):
+                    if forbidden(entry.name, trusted=self.trusted):
                         continue
                     metadata = entry.stat(follow_symlinks=False)
                     if stat.S_ISDIR(metadata.st_mode):
@@ -336,8 +488,44 @@ class FileBroker:
         return "\n".join(results)[:50000]
 
 
+_OWNED_MODULES = {}
+
+
+def owned_module(name):
+    """Load only a fixed adjacent program module under Python -I, never project imports."""
+    if name not in {"images", "commands", "team_messages", "worker_mcp"}:
+        raise PolicyError("Unknown owned module")
+    if name not in _OWNED_MODULES:
+        package_name = "orchestrator"
+        if package_name not in sys.modules:
+            package_specification = importlib.util.spec_from_file_location(
+                package_name,
+                Path(__file__).with_name("__init__.py"),
+                submodule_search_locations=[str(Path(__file__).resolve().parent)],
+            )
+            package = importlib.util.module_from_spec(package_specification)
+            sys.modules[package_name] = package
+            package_specification.loader.exec_module(package)
+        specification = importlib.util.spec_from_file_location(
+            package_name + "." + name, Path(__file__).with_name(name + ".py")
+        )
+        module = importlib.util.module_from_spec(specification)
+        sys.modules[specification.name] = module
+        specification.loader.exec_module(module)
+        _OWNED_MODULES[name] = module
+    return _OWNED_MODULES[name]
+
+
 def serve(options):
+    # SystemExit unwinds run_command's finally block, killing its process group.
+    # Default SIGTERM would skip that cleanup and orphan a trusted command.
+    def stop(_signal, _frame):
+        raise SystemExit(128 + _signal)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     broker = FileBroker(options)
+    allowed = options.get("tool_names", options.get("tools", []))
     try:
         while True:
             line = sys.stdin.buffer.readline(2 * MAX_BYTES + 1)
@@ -347,11 +535,49 @@ def serve(options):
                 if len(line) > 2 * MAX_BYTES or not line.endswith(b"\n"):
                     raise PolicyError("oversized or incomplete tool request")
                 request = decode(line)
+                if (
+                    not isinstance(request, dict)
+                    or set(request) != {"name", "arguments"}
+                    or not isinstance(request["name"], str)
+                    or request["name"] not in allowed
+                    or not isinstance(request["arguments"], dict)
+                ):
+                    raise PolicyError("invalid broker protocol or unoffered tool")
+            except (ValueError, KeyError, TypeError, RecursionError):
+                print(
+                    json.dumps({"ok": False, "fatal": True, "error": "Invalid tool protocol"}),
+                    flush=True,
+                )
+                return
+            try:
                 text = broker.execute(request["name"], request["arguments"])
                 response = {"ok": True, "text": text}
-            except (ValueError, OSError, KeyError, TypeError, RecursionError):
-                # Do not echo attacker-controlled paths or secret file contents.
-                response = {"ok": False, "error": "file tool denied or failed"}
+            except AuthorityError as error:
+                # Deny the individual access, not the entire task; the model can correct its path.
+                response = {"ok": False, "fatal": False, "error": str(error)}
+            except FileNotFoundError:
+                response = {
+                    "ok": False,
+                    "fatal": False,
+                    "error": "File or directory not found; inspect the directory and retry with an existing path",
+                }
+            except PermissionError:
+                response = {
+                    "ok": False,
+                    "fatal": False,
+                    "error": "Permission denied for this path; choose an accessible project path",
+                }
+            except PolicyError as error:
+                response = {"ok": False, "fatal": False, "error": str(error)}
+            except Exception as error:  # noqa: BLE001 - tool protocol must return sanitized failures
+                # No provider response, command content, credentials, or token in errors.
+                response = {
+                    "ok": False,
+                    "fatal": False,
+                    "error": "Tool failed ("
+                    + type(error).__name__
+                    + "); check arguments and the current worker state",
+                }
             print(json.dumps(response, ensure_ascii=True), flush=True)
     finally:
         broker.close()
@@ -469,6 +695,12 @@ def launch(options):
         for name in provider_variables.get(options["provider"], ()):
             if name in os.environ:
                 environment[name] = os.environ[name]
+        if (
+            options["mode"] == "write"
+            and options.get("images", {}).get("enabled") is True
+            and "OPENAI_API_KEY" in os.environ
+        ):
+            environment["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
         options = {
             **options,
             "package": str(package),

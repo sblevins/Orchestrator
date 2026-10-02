@@ -35,8 +35,10 @@ Routine status prompts are saved without automatically paying for a deep review.
 
 Project classifications and legacy FirstMate-compatible rules/default guide selection without automatically populated model defaults.
 The coordinator selects planned and on-demand workers while preserving their origins, with classification difficulty or exact effort chosen explicitly.
-The monitor still selects supplied pending legacy plan workers; classification suggestions become `worker.routing_recommended` notifications for the coordinator, not executable selections or failed reviews.
-Read-only Git comparison teams run two rounds under ordinary concurrency over the same frozen commit and accepted dependencies, comparing complete untrusted reports without claiming real-time chat or consensus.
+The monitor still selects supplied pending legacy plan workers.
+Classification suggestions become `worker.routing_recommended` notifications unless unattended authorization permits selection using configured profile effort or `execution.worker_difficulty`.
+Read-only Git comparison teams run two rounds under ordinary concurrency over the same frozen commit and accepted dependencies, comparing complete untrusted reports without guaranteed consensus.
+Live durable send/read tools also let peers exchange messages as untrusted data, never new instructions or permissions.
 Workers and team children are tracked background sub-agents with native observers, without new terminal tabs.
 Code changes remain in isolated worktrees until separately reviewed and integrated.
 Authorized coordinator APIs handle project approvals, while checked result acceptance and dependency enforcement remain mandatory; teams are accepted through their parent only.
@@ -53,7 +55,8 @@ Pi visibility uses the already installed sub-agent observer integration when ava
 A visual graph editor and distributed durability through Temporal are also not implemented.
 The current program exposes a validated graph and readiness through tools and the CLI.
 
-The pirate persona, terminal keystroke injection, implicit approval, unrestricted specialist shell tools, and silent model fallback are intentionally excluded.
+The pirate persona, terminal keystroke injection, implicit approval, unrestricted core-specialist shell tools, and silent model fallback are intentionally excluded.
+Trusted workers can run commands through owned `run_command`; standing `execution.unattended` authorization permits eligible plan approval and candidate acceptance without granting policy-required worker approval.
 Native Claude voice is retained rather than replaced.
 
 ## Correction to the earlier research

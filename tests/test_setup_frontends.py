@@ -46,13 +46,16 @@ class SetupFrontendTests(unittest.TestCase):
             "accept_worker",
             "approve_node",
             "cancel_worker",
-            "not automatically accepted",
+            "standing authorization",
             "/model and /effort",
             "validation.blockers",
             "never invent preferences or defaults",
             "never force an overwrite",
             "including after deletion or an incomplete draft",
-            "Workers currently have file tools only",
+            "Workers have run_command",
+            "retry_review",
+            "execution.base_ref",
+            "execution.unattended=true",
         ):
             self.assertIn(text, instructions)
         for obsolete_claim in (

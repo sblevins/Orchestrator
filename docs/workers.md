@@ -9,9 +9,10 @@ See [worker visibility](worker-visibility.md) for attachment behavior and [proje
 
 The bound coordinator selects both planned and on-demand work without changing plan origins.
 The monitor still selects supplied pending legacy plan requests.
-Classification suggestions become `worker.routing_recommended` notifications, not executable selections or failed monitor reviews; the coordinator chooses final difficulty or effort.
+Without unattended authorization, classification suggestions become `worker.routing_recommended` notifications and the coordinator chooses final difficulty or effort.
+With unattended authorization, recommendations can select pending planned workers using configured profile effort or `execution.worker_difficulty`.
 Explicit policy-match overrides remain a separate operator CLI capability, not a caller-supplied role label.
-Plain version: workers follow your saved policy, and the coordinator makes the final classification choice here in chat.
+Plain version: workers follow your saved policy, with chat decisions or your saved permission to proceed.
 
 ## Configure and select
 
@@ -70,7 +71,8 @@ For routine project approvals, use the conversational APIs rather than requiring
 
 ## Workspaces, results, and acceptance
 
-Read workers use file-reading tools only.
+Guarded read workers use file-reading tools; team peers also have owned messaging tools.
+`execution.base_ref` selects the Git branch used as the worker checkout baseline.
 Accepted dependency commits are supplied through an isolated checkout when needed, and comparison teams freeze the same Git commit and accepted inputs across two rounds.
 Write workers receive a separate worktree and branch created by the supervisor, never permission to edit the source checkout.
 Snapshot preparation requires clean source state apart from the sole regular `.orchestrator/crew-dispatch.json` policy path.
@@ -80,7 +82,8 @@ No stash, commit, ignore rule, or Git exclude write is needed to preserve routin
 Accepted prerequisite commits can be merged into the isolated worker checkout; this never integrates a candidate into the source branch.
 Unsupported Git filters, merge drivers, unsafe paths, or provenance changes block preparation or capture.
 
-Worker tools allow reading and permitted file edits only, with no shell commands or tests.
+Guarded workers have reading and permitted file-edit tools only.
+Trusted mode adds owned `run_command` for commands and tests without an OS sandbox; file-tool restrictions do not contain those commands.
 The supervisor prepares Git worktrees and captures bounded diffs and signed local candidate commits.
 Signing and signature verification must already be configured; the supervisor never changes identity or disables signing.
 These controls are not an operating-system sandbox against hostile programs running as the same user.
@@ -93,6 +96,22 @@ Successful execution creates a `candidate`; a plan node becomes `awaiting_review
 Review the saved report, diff, commit, remaining issues, and independent verification before calling `accept_worker(request_id, reason)`.
 For comparison teams, review the combined evidence and accept only the parent request, not individual children.
 Acceptance rechecks applicable gates and completes the node, allowing dependent work to proceed.
+`execution.unattended = true` supplies standing authorization to approve reviewed plans and accept candidates with an explicit empty `remaining_issues` list when live gates pass.
+It never supplies policy-required explicit worker approval, including security-audit teams, and never accepts team children.
 Acknowledging a notification is not acceptance, and acceptance does not merge or push.
 Use `cancel_worker(request_id, reason)` for a worker or an entire team and wait for terminal confirmation.
 Plain version: check the result before accepting it, and only then let later jobs rely on it.
+
+## Existing source edits and project setup
+
+Trusted workers starting from `HEAD` receive a signed isolated snapshot of ordinary tracked and untracked project files, including an unborn Git repository.
+The source files, index, and checked-out branch remain unchanged.
+Credential and orchestration control files are excluded from the copied snapshot; existing committed history is not scrubbed.
+An explicit `execution.base_ref` or frozen team baseline uses that committed ref instead, recording that unrelated source edits were excluded.
+Plain version: you do not need to commit unfinished work merely to start a trusted worker, and choosing another branch does not silently mix in edits from the current one.
+
+Trusted snapshots preserve relative internal project links, such as `CLAUDE.md` pointing to `AGENTS.md`, without pointing back into the source checkout.
+Trusted workers can initialize registered Git submodules and capture ordinary parent-project changes after builds.
+Uncommitted files inside a submodule must be handled inside that submodule before capture, because a parent Git commit cannot contain those files.
+Changed source submodule pointers must be committed in the parent before snapshotting; they are not silently omitted.
+Plain version: normal project links and submodule setup work, but unfinished work inside a separate submodule cannot be reported as saved by a parent-project commit.

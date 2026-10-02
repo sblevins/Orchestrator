@@ -12,14 +12,25 @@ The planner should receive the selected template as guidance when constructing a
 These pure graph APIs do not start processes, persist state, verify acceptance evidence, or authenticate human approvals.
 The durable worker service separately enforces these gates and dispatches selected workers.
 Nodes may declare mode `read` (default) or `write`; only work nodes may request write mode.
-A successful worker remains `awaiting_review` until operator acceptance, so its dependents cannot start early.
+A successful worker remains `awaiting_review` until checked acceptance through bound `accept_worker`, the optional CLI, or standing `execution.unattended` authorization, so its dependents cannot start early.
+Unattended acceptance requires an explicit empty `remaining_issues` list and satisfied live gates; it never supplies policy-required worker approval.
 Plain version: finishing a worker is not enough; its result must be accepted before the next task starts.
 The current planner/critic role interaction is not an arbitrary graph executor.
-In plain English: the program can check the task order and tell you what is allowed next, but it does not run these tasks for you yet.
+In plain English: the program checks task order and only starts later work after accepting the required earlier results under the project's rules.
+
+Clarify material unknowns before invoking the paid planner, then obtain independent final review of the saved graph.
+`retry_review` retries an eligible failed critic using the saved draft and original review evidence without starting a new planner.
+An unknown critic outcome requires investigation rather than automatic replay.
+Plain version: settle important questions first, and do not pay to draft the same plan again just because its review failed.
 
 ## Select and customize a template
 
-Set the template name in `config/local.toml`, or in an existing project-specific configuration:
+Use `configure_project` to save complete project-local graphs in `planning.templates` and select a name with `planning.workflow`.
+These changes write only private `<home>/config/projects/<bound-id>.json`, never another project's configuration or shared defaults.
+The active bound coordinator can change templates at any time, without an initial setup seal or operator handoff.
+Plain version: ask in chat to change this project's task order without changing anyone else's settings.
+
+The corresponding planning and execution settings are:
 
 ```toml
 [planning]
@@ -31,11 +42,12 @@ max_parallel = 3
 dependency_failure = "block"
 ```
 
-`load_workflow(home: Path, name: str) -> dict` first checks `home/config/workflows/<name>.json`.
-If absent, it loads the tracked `workflows/<name>.json` beside the installed source.
-A private file replaces the entire template, rather than merging individual nodes.
+Configured `planning.templates` take precedence over file templates with the same name.
+For file templates, `load_workflow(home: Path, name: str) -> dict` checks `home/config/workflows/<name>.json`, then tracked `workflows/<name>.json` beside the installed source.
+The home workflow directory is shared, administrator-only customization, not a project-scoped edit destination.
+A private shared file replaces the entire template, rather than merging individual nodes.
 A malformed private file is an error, not permission to fall back silently.
-A new name can exist only in the private directory; templates do not have to be tracked to work.
+New names can be defined in project-local `planning.templates` without creating shared files.
 Project configuration selects a template name, not an arbitrary file path.
 
 Names and node IDs must start with an ASCII letter or digit, followed by ASCII letters, digits, underscores, or hyphens, up to 128 characters total.

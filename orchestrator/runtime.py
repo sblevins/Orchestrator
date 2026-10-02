@@ -162,6 +162,38 @@ def _signal_group(record: dict, number: int) -> None:
             os.killpg(record["pid"], number)
 
 
+def _remember_descendants(root_pid, descendants):
+    """Track detached command sessions too, without signalling reused process IDs."""
+    parents = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            parents[int(entry.name)] = int(fields[1])
+        except (OSError, ValueError, IndexError):
+            continue
+    owned = {root_pid} | {
+        pid for pid, identity in descendants.items() if process_identity(pid) == identity
+    }
+    while True:
+        children = {pid for pid, parent in parents.items() if parent in owned} - owned
+        if not children:
+            break
+        owned.update(children)
+    for pid in owned - {root_pid}:
+        identity = process_identity(pid)
+        if identity is not None:
+            descendants[pid] = identity
+
+
+def _kill_descendants(descendants):
+    for pid, identity in descendants.items():
+        if process_identity(pid) == identity:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
 def _resume_session(store: Store, task: dict) -> str | None:
     if task["role"] != "monitor":
         return None
@@ -209,6 +241,8 @@ def run_task(home: Path, task_id: str, token: str) -> int:
     task = store.task(task_id)
     child = None
     child_record = {}
+    descendants = {}
+    worker_service = None
     try:
         from .adapters import build_command, parse_result
         from .models import model_family
@@ -247,6 +281,12 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 project_root,
                 grant.get("dependency_commits", ()),
                 baseline_commit=grant.get("baseline_commit"),
+                base_ref=grant.get("base_ref", "HEAD"),
+                isolated=bool(
+                    config.get("commands", {}).get("enabled")
+                    or config["execution"].get("mode") == "trusted"
+                ),
+                trusted=config["execution"].get("mode") == "trusted",
             )
             worker_service.record_workspace(task, workspace)
             working_directory = Path(workspace["path"])
@@ -269,6 +309,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 working_directory,
                 output_path,
                 project_root=working_directory if grant["mode"] == "read" else project_root,
+                worker_context={"home": str(store.home), "task_id": task_id, "token": token},
             )
         else:
             command = build_command(
@@ -324,6 +365,8 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 selector.get_map()
                 or os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None
             ):
+                if worker_service is not None:
+                    _remember_descendants(child.pid, descendants)
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Harness deadline exceeded")
                 if not store.heartbeat(task_id, token):
@@ -342,6 +385,9 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                         stdout.extend(data[:available])
                     if count > OUTPUT_LIMIT:
                         raise RuntimeError("Harness output exceeded 8 MiB")
+            if worker_service is not None:
+                _remember_descendants(child.pid, descendants)
+                _kill_descendants(descendants)
             # Keep the leader unreaped until cleanup, so its PID cannot be reused.
             # Successful harnesses must not leave background descendants behind.
             with contextlib.suppress(ProcessLookupError):
@@ -376,7 +422,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 "reported_models_scope": "harness usage, including any internal or sub-agent calls",
             }
             if role["adapter"] == "claude"
-            else None,
+            else values.get("model_selection"),
         ):
             return 1
         return 0 if store.task(task_id)["state"] == "succeeded" else 1
@@ -385,6 +431,9 @@ def run_task(home: Path, task_id: str, token: str) -> int:
         return 1
     finally:
         if child is not None:
+            if worker_service is not None:
+                _remember_descendants(child.pid if child.returncode is None else -1, descendants)
+                _kill_descendants(descendants)
             _signal_group(child_record, signal.SIGKILL)
             # If the leader exited, its unreaped process still protects the group PID.
             if child.returncode is None:
@@ -551,6 +600,9 @@ def supervise(home: Path, once: bool = False) -> None:
                 )
                 _reconcile(store, launchers)
                 _process_results(store)
+                from .autonomy import advance
+
+                advance(store)
                 from .workers import WorkerService
 
                 workers = WorkerService(store)

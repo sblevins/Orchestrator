@@ -16,15 +16,20 @@ frontend_cpus = 1
 [planning]
 structure = "graph"
 workflow = "plan-review"
+clarification = "material"
 max_review_rounds = 3
 
 [execution]
+mode = "restricted"
+unattended = false
+worker_difficulty = "hard"
+base_ref = "HEAD"
 max_parallel = 3
 dependency_failure = "block"
 
 [personalization]
 name = "User"
-communication_style = "Concise, neutral, practical. No pirate language. Seek independent evidence, distinguish facts from assumptions, and explain complicated points in plain English. Never automatically approve code execution or permission requests."
+communication_style = "Concise, neutral, practical. No pirate language. Seek independent evidence, distinguish facts from assumptions, and explain complicated points in plain English. Follow the user's project-specific standing authorization; do not invent repeated approval requirements."
 
 [frontends]
 preferred = "claude"
@@ -77,6 +82,7 @@ prompt_path = "roles/monitor.md"
 # Every prompt is saved. Only exact routine queries skip starting a deep review.
 [monitoring]
 review_every_prompt = false
+quiet_seconds = 20
 routine_prompts = ["/status", "/tasks", "/progress", "status", "progress", "what's the status", "what is the status", "what's the status of work", "what is the status of work", "how is it going", "show progress", "show the current status", "list running tasks"]
 
 # Project-local overrides are editable through configure_project.
@@ -84,3 +90,19 @@ routine_prompts = ["/status", "/tasks", "/progress", "status", "progress", "what
 coordinator_approvals = true
 require_write_approval = false
 enforce_monitor_holds = true
+
+# Optional, separately billed image backend. Enable per project through configure_project.
+[images]
+enabled = false
+model = "gpt-image-2"
+size = "auto"
+quality = "auto"
+output_format = "png"
+
+# Trusted execution mode enables commands without requiring these separate opt-ins.
+[commands]
+enabled = false
+sandbox = true
+network = false
+timeout_seconds = 300
+[commands.tool_paths]

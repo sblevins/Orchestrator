@@ -44,7 +44,7 @@ class HookTests(unittest.TestCase):
 
     def test_all_prompts_delegate_intact_including_unbound(self):
         api = ModuleType("orchestrator.api")
-        api.request = Mock(return_value={})
+        api.request = Mock(return_value={"prompt_id": "saved-prompt"})
         prompt = "oversized " * 10000
         with patch.dict(sys.modules, {"orchestrator.api": api}):
             self.hook("UserPromptSubmit", prompt=prompt)
@@ -98,7 +98,10 @@ class HookTests(unittest.TestCase):
             event_id = self.store._event(
                 database, "project", "monitor.findings", {"findings": []}, "frontend", notify=True
             )
-        output = self.hook("Stop")
+        with patch("orchestrator.monitoring.time.time", return_value=100):
+            self.assertEqual(self.hook("Stop"), {})
+        with patch("orchestrator.monitoring.time.time", return_value=120):
+            output = self.hook("Stop")
         self.assertEqual(output["hookSpecificOutput"]["hookEventName"], "Stop")
         self.assertLessEqual(len(output["hookSpecificOutput"]["additionalContext"]), 9000)
         self.assertEqual(self.hook("Stop", stop_hook_active=True), {})

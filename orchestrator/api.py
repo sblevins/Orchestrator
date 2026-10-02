@@ -19,6 +19,7 @@ READ_ACTIONS = {
     "status",
     "task",
     "updates",
+    "delivery_updates",
     "read_note",
     "graph",
     "workflows",
@@ -221,6 +222,22 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         return record_prompt(store, session_id, payload.get("prompt", ""))
     if action == "updates":
         return {"updates": store.updates(session_id)}
+    if action in {"foreground_start", "foreground_finished"}:
+        from .monitoring import begin_turn, finish_turn
+
+        if set(payload) - {"turn_id"}:
+            raise StateError("Foreground lifecycle accepts only turn_id")
+        turn_id = _text(payload, "turn_id", 128)
+        return (begin_turn if action == "foreground_start" else finish_turn)(
+            store, session_id, turn_id
+        )
+    if action == "delivery_updates":
+        from .monitoring import delivery_updates
+
+        config = load_config(home, session["project_id"])
+        return delivery_updates(
+            store, session_id, config.get("monitoring", {}).get("quiet_seconds", 20)
+        )
     session, project_id = _bound(
         store, session_id, writer=action not in READ_ACTIONS | {"acknowledge"}
     )
@@ -323,6 +340,14 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
 
         state["setup"] = project_setup(store, session_id)
         return state
+    if action == "retry_review":
+        from .reviews import retry_review
+
+        result = retry_review(
+            store, session_id, _text(payload, "plan_id", 96), _text(payload, "reason", 12000)
+        )
+        _start_service(home)
+        return result
     if action == "start_plan":
         from .graphs import configured_workflow
 
@@ -439,6 +464,10 @@ FIELDS = {
     "task": ({"task_id": "string"}, ["task_id"]),
     "cancel_task": ({"task_id": "string"}, ["task_id"]),
     "updates": ({}, []),
+    "delivery_updates": ({}, []),
+    "foreground_start": ({"turn_id": "string"}, ["turn_id"]),
+    "foreground_finished": ({"turn_id": "string"}, ["turn_id"]),
+    "retry_review": ({"plan_id": "string", "reason": "string"}, ["plan_id", "reason"]),
     "acknowledge": ({"event_ids": "array"}, ["event_ids"]),
     "record_decision": (
         {"summary": "string", "rationale": "string", "scope_change": "boolean"},
@@ -479,9 +508,13 @@ DESCRIPTIONS = {
     "register_project": "Register a project directory explicitly identified by the user; never guess ambiguous paths.",
     "bind_project": "Permanently bind this instance to one registered project and load its current state and notes.",
     "status": "Read authoritative current work state, blockers, monitor freshness, and pending updates.",
-    "start_plan": "Start tracked graph planning and independent critique, without authorizing implementation.",
+    "start_plan": "After clarifying consequential unknowns with the user, submit the agreed brief for graph planning and independent critique. Present the result for review unless standing project authorization covers execution.",
     "task": "Inspect a tracked task and its saved result; process exit alone does not prove success.",
     "cancel_task": "Request cancellation of a task owned by this project; wait for terminal confirmation.",
+    "delivery_updates": "Read ready notifications split into silent guidance and interrupting events; no automatic acknowledgment.",
+    "foreground_start": "Frontend lifecycle: mark this response active using its unique turn ID.",
+    "foreground_finished": "Frontend lifecycle: mark the same response complete; stale IDs cannot finish a newer turn.",
+    "retry_review": "Retry only a failed critic using the saved plan and current critic settings, without restarting the planner.",
     "updates": "Read unacknowledged results and monitor feedback without removing them.",
     "acknowledge": "Acknowledge exact event IDs only after handling them; acknowledgment does not resolve safety holds.",
     "record_decision": "Record a consequential decision, evidence rationale, or scope change for independent monitoring.",

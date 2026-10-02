@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from .config import ConfigurationError, validate_config
-from .models import model_family, normalize_model
+from .models import normalize_model, selector_family
 from .store import atomic_write
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -135,7 +135,7 @@ def build_frontend_command(
             provider,
             # Family selectors are resolved exactly by the owned startup extension,
             # not Pi CLI's provider-wide fuzzy/lexicographic matching.
-            *([] if model_family(role["model"]) else ["--model", role["model"]]),
+            *([] if selector_family(role["model"]) else ["--model", role["model"]]),
             "--thinking",
             role["effort"],
             "--session-dir",

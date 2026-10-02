@@ -58,7 +58,9 @@ Executable commands remain trusted local configuration, not conversational setti
 If you have no private configuration yet, run `./bin/orchestrator config init`.
 Edit each role's model and effort without changing Python code.
 Use `model = "Opus"` or `model = "Fable"` to follow that supported family, or an exact ID such as `claude-opus-5-5` to keep a version pin.
-`Sonnet` and `Haiku` also work; family names are case-insensitive and existing pins stay unchanged.
+`Sonnet` and `Haiku` also work; Pi additionally supports `Astra` and `Sol` in the selected provider's installed catalog, with exact IDs taking precedence.
+Family names are case-insensitive and existing pins stay unchanged.
+Pi worker profiles can use `max-supported` to request the highest supported effort for the selected model.
 See [model families](docs/configuration.md#model-families-or-exact-versions) for Claude/Pi resolution and catalog limits.
 Shared background settings handle deadlines and machine-resource reservations; roles do not need individual timeout, CPU, or memory parameters.
 There is no per-role dollar budget or spending-cap parameter.
@@ -105,6 +107,17 @@ See [configuration](docs/configuration.md) and [workflow templates](docs/workflo
 Every prompt is saved; exact routine status questions do not start an expensive review by default.
 Ambiguous or consequential messages do, and the orchestrator cannot veto that requirement.
 
+## Planning, monitoring, and images
+
+Clarify material unknowns before a paid planner call, then obtain independent final review.
+Use `retry_review` to retry an eligible failed critic against the saved draft without rerunning the planner; unknown outcomes are not blindly replayed.
+The monitor waits for foreground completion and `monitoring.quiet_seconds` (20 by default).
+Only blocking monitor findings interject; informational and warning findings stay silent.
+Explicit image generation uses the separately billed OpenAI Images API with `OPENAI_API_KEY`, not subscription OAuth.
+Project `images.enabled` defaults to false, and supported outputs are PNG and JPEG.
+Plain version: settle important questions before paying for planning, keep routine feedback quiet, and enable images separately if you want to pay for them.
+These integrations are undergoing offline validation; see [current status](docs/status.md) for validation and deployment limits.
+
 ## Included now
 
 - Four planning roles, with only orchestrator and monitor remaining ongoing roles.
@@ -143,20 +156,27 @@ The CLI remains available if you prefer manual setup:
 
 The bound coordinator selects planned and on-demand workers without relabeling plan origins.
 For named classifications it chooses `easy`, `hard`, or `very-hard` difficulty, or exact effort; the router supplies the configured model or team.
-The monitor still selects supplied legacy pending plan workers; classification suggestions become `worker.routing_recommended` notifications, not executable selections or failed monitor reviews.
-The coordinator chooses final difficulty or effort.
+The monitor still selects supplied legacy pending plan workers.
+Without unattended authorization, classification suggestions become `worker.routing_recommended` notifications and the coordinator chooses final difficulty or effort.
+With unattended authorization, monitor classification recommendations can select pending planned workers using configured profile effort or `execution.worker_difficulty` (default `hard`), without inventing models or effort.
 No separate routing model runs, and an empty policy cannot execute a worker.
 Read-only Git audit, research, and design teams use 2 to 8 distinct configured models over the same frozen Git commit and accepted dependencies.
-Two rounds compare complete untrusted reports under normal concurrency: four peers mean eight jobs, not real-time chat or guaranteed consensus.
+Two rounds compare complete untrusted reports under normal concurrency: four peers mean eight jobs, without guaranteed consensus.
+Peers can also exchange live durable messages through `send_team_message` and `read_team_messages`; neither messages nor reports grant new authority.
 Child workers use native observers in the existing frontend, never new Herder windows.
 Only the parent team's result can be accepted.
 
 Permissions default to `coordinator_approvals=true`, `require_write_approval=false`, and `enforce_monitor_holds=true`; change them locally with `configure_project`.
 The coordinator can use `approve_plan`, `resolve_hold`, `approve_worker`, `accept_worker`, `approve_node`, and `cancel_worker` with reasons instead of sending you to an operator CLI.
-Plan approval still requires independent review and fresh monitor evidence; successful candidates are not automatically accepted.
+Plan approval still requires independent review and fresh monitor evidence.
+`execution.unattended = true` provides standing project authorization for reviewed-plan approval and candidate acceptance when `remaining_issues` is explicitly empty and live gates pass.
+It never supplies required explicit worker approval, including security-audit teams, and only team parents can be accepted.
 Write workers use isolated Git worktrees, never your source checkout.
 Project ownership, dependency correctness, source isolation, credential limits, and no blind retry of unknown outcomes remain mandatory.
-Workers use file tools only: they cannot run shell commands or tests, and must disclose checks they could not perform.
+Guarded workers use file tools only and must disclose checks they could not perform.
+`execution.mode = "trusted"` enables native foreground tools and owned worker `run_command` execution for commands and tests without an OS sandbox.
+`execution.base_ref` selects the Git branch for worker checkouts, not a directory.
+Plain version: trusted mode lets tools run commands, so only enable it for work you trust.
 See [project routing](docs/project-routing.md) for the policy schema, team behavior, and conversational permissions.
 Plain version: change your preferences and make authorized decisions here, then check results before accepting them, without opening more terminals.
 
@@ -164,13 +184,14 @@ Plain version: change your preferences and make authorized decisions here, then 
 
 Pi visibility uses the already installed `@tintinweb/pi-subagents` plugin when available.
 This project does not install third-party plugins automatically.
-There is no distributed scheduler, automatic publishing, automatic permission approval, or guarantee of exactly-once execution.
+There is no distributed scheduler, automatic publishing, or guarantee of exactly-once execution.
+Standing project authorization does not automatically answer native permission prompts or grant policy-required worker approval.
 
 This is a single-machine implementation, not a Temporal deployment.
 The supervisor survives frontend exits, but an OS restart or supervisor crash requires starting it again; binding or resuming a project in either frontend does this.
 Native voice, live model access, and Claude's idle wake behavior require interactive acceptance testing.
 No per-role dollar cap is imposed on either specialist adapter; deadlines and machine-resource limits still apply.
-Plain version: workers can inspect or edit within their granted scope, but cannot publish changes or approve themselves.
+Plain version: workers must stay within their assigned work; the supervisor does not publish changes or let workers approve themselves.
 
 ## Checks and documentation
 

@@ -92,7 +92,17 @@ def _view(row, observer, *, detail=False):
             "reported_models": [
                 _display_text(model, 256) for model in selection["reported_models"][:32]
             ],
-            "reported_models_scope": "harness usage, including any internal or sub-agent calls",
+            "reported_models_scope": selection.get(
+                "reported_models_scope", "harness usage, including any internal or sub-agent calls"
+            ),
+            **(
+                {
+                    "requested_effort": selection["requested_effort"],
+                    "resolved_effort": selection["resolved_effort"],
+                }
+                if "resolved_effort" in selection
+                else {}
+            ),
         }
     # Deliberately omit task prompts, configuration, credentials, raw output and runner errors.
     # Reports are untrusted worker data, not instructions or proof of operator acceptance.

@@ -948,6 +948,14 @@ class Store:
             ).fetchone()
             if not project or project["next_monitor_at"] > now():
                 return None
+            from .config import load_config
+            from .monitoring import should_review
+
+            quiet = (
+                load_config(self.home, project_id).get("monitoring", {}).get("quiet_seconds", 20)
+            )
+            if not should_review(database, project_id, quiet):
+                return None
             if database.execute(
                 "SELECT 1 FROM tasks WHERE project_id=? AND role='monitor' AND state IN ('queued','starting','running')",
                 (project_id,),
@@ -984,6 +992,12 @@ class Store:
     ) -> dict | None:
         try:
             with self.transaction() as database:
+                from .monitoring import should_review
+
+                if not should_review(
+                    database, project_id, config.get("monitoring", {}).get("quiet_seconds", 20)
+                ):
+                    return None
                 task_id = self._enqueue(
                     database,
                     project_id,

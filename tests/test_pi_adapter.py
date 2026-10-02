@@ -461,11 +461,8 @@ class PiInstalledE2ETests(unittest.TestCase):
         self.assertEqual(parse_result("pi", result.stdout, 0)["text"], "written")
         self.assertFalse((self.source / "result.txt").exists())
 
-    def test_forbidden_operation_fails_even_if_model_recovers(self):
-        for tool, arguments in (
-            ("bash", {"command": "touch forbidden"}),
-            ("read", {"path": str(self.auth)}),
-        ):
+    def test_unoffered_operation_fails_even_if_model_recovers(self):
+        for tool, arguments in (("bash", {"command": "touch forbidden"}),):
             self.requests.clear()
             responses = [
                 {

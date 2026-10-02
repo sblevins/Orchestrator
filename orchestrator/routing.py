@@ -23,16 +23,26 @@ class RoutingError(ValueError):
 
 
 _PROVIDER = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-_POLICY_EFFORTS = {"off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+_POLICY_EFFORTS = {
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "max-supported",
+    "ultra",
+}
 _EXECUTOR_EFFORTS = {
-    "pi": {"off", "minimal", "low", "medium", "high", "xhigh"},
+    "pi": {"off", "minimal", "low", "medium", "high", "xhigh", "max", "max-supported"},
     "claude": {"low", "medium", "high", "xhigh", "max"},
 }
 _MAX_POLICY_BYTES = 1024 * 1024
 _DEFAULT_DIFFICULTY_LEVELS = {
     "easy": {"claude": "low", "pi": "low"},
     "hard": {"claude": "high", "pi": "high"},
-    "very-hard": {"claude": "max", "pi": "xhigh"},
+    "very-hard": {"claude": "max", "pi": "max-supported"},
 }
 
 
@@ -55,15 +65,20 @@ def _effort(profile, choice, policy):
             .get(difficulty, {})
             .get(harness, _DEFAULT_DIFFICULTY_LEVELS[difficulty].get(harness))
         )
-    return choice.get("effort", profile.get("effort"))
+    effort = choice.get("effort", profile.get("effort"))
+    return "max" if effort == "max-supported" and profile["harness"] == "claude" else effort
 
 
 def _classification_profiles(value, context):
     if not isinstance(value, dict):
         raise RoutingError(f"{context} must be a profile or an object containing team")
     if "team" in value:
-        if set(value) != {"team"}:
-            raise RoutingError(f"{context}.team cannot be combined with profile fields")
+        if set(value) - {"team", "approval", "description"}:
+            raise RoutingError(f"{context} supports team, approval and description")
+        if "approval" in value and value["approval"] not in {"user", "captain"}:
+            raise RoutingError(f"{context}.approval must be user (explicit team confirmation)")
+        if "description" in value:
+            _text(value["description"], f"{context}.description")
         profiles = value["team"]
         if not isinstance(profiles, list) or not 2 <= len(profiles) <= 8:
             raise RoutingError(f"{context}.team must contain 2 to 8 distinct profiles")
@@ -517,7 +532,8 @@ def _resolve_classification(policy, choice):
         "rule": classification,
         "candidate": None,
         "rationale": choice["rationale"],
-        "requires_approval": False,
+        "requires_approval": configured.get("approval") in {"user", "captain"},
+        "team_description": configured.get("description", ""),
         "evidence": capture_quota_evidence(),
         "uncertainty": ["Quota availability and model catalog support have not been verified"],
     }

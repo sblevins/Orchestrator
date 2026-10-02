@@ -11,7 +11,9 @@ Plain version: the configured model determines which approved program runs the t
 Specialists receive `-p --output-format json`, explicit `--model` and `--effort`, `--permission-mode dontAsk`, and matching `--tools` and `--allowedTools` lists.
 The specialist allowlist is a validated subset of `Read,Glob,Grep`; an empty list disables tools rather than restoring defaults.
 Workers additionally receive `--restricted`, with `Read,Glob,Grep` for reading and `Edit,Write` added only in write mode.
-Workers receive no shell, test runner, or permission-prompt capability.
+Restricted workers receive file tools by default; `commands.enabled` adds owned command execution using the configured sandbox.
+Trusted workers receive owned `run_command` automatically without an OS sandbox.
+Native permission prompts are not automatically approved.
 Write workers are not granted the source checkout as an additional directory.
 
 `--settings '{}'` suppresses the installed wrapper's global model pin, while `--setting-sources ''` excludes inherited settings and recursive orchestration hooks.
@@ -20,7 +22,7 @@ These controls are not an operating-system sandbox or a bypass of managed policy
 Claude specialist resume uses an explicit saved conversation ID through `--resume`, with the same model selector, effort, and permissions.
 The selector may be an exact ID or a canonical native family alias; a family can resolve differently on a later launch.
 Worker invocations start fresh instead of inheriting a conversation.
-Plain version: workers get only the listed file tools, but this does not protect against other programs running as the same user.
+Plain version: guarded workers get only the listed file tools; trusted commands can act outside those file-tool limits.
 
 ## Owned Pi SDK bridge
 
@@ -30,16 +32,18 @@ An isolated Python launcher in `orchestrator/pi_tools.py` validates that install
 The bridge imports the SDK from that installation and validates its package name and version again.
 
 Provider, model, effort, and tools are explicit.
-The bridge requires an exact catalog provider/model match, usable authentication, supported effort, and an unchanged session effort and active-tool allowlist.
+The bridge resolves exact IDs first, or supported families such as `Astra` and `Sol` within the installed provider catalog, then requires usable authentication, supported effort, and an unchanged session effort and active-tool allowlist.
+Pi worker `max-supported` selects the highest effort supported by the resolved model; core roles still require an explicit supported effort.
 An unavailable model, unsupported effort, changed model, or failed preflight stops the task without silent fallback or effort downgrade.
-Pi executor efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`, subject to the chosen model's capabilities.
+Pi executor efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`, subject to the chosen model's capabilities.
 Schema validation does not prove account access; live model availability still requires authorized testing.
 Plain version: if Pi cannot use exactly what was requested, it stops instead of choosing something else.
 
 Every Pi task has a fresh in-memory session and temporary agent directory.
 Pi tasks are ephemeral and cannot resume; their diagnostic session header is not a resumable supervisor session ID.
 The bridge disables inherited extensions, skills, prompt templates, agent files, user/project model catalogs, automatic compaction, and retries.
-It installs only owned file tools, never the default shell tool.
+It installs owned file tools, never the default shell tool.
+Trusted workers additionally receive owned `run_command`; registered team peers receive durable send/read message tools, and enabled image generation uses the owned image tool.
 
 Authentication reuses the canonical resolved `auth.json` path from `PI_CODING_AGENT_DIR`, or the usual `~/.pi/agent` directory when unset.
 The temporary task home does not receive an auth copy or alias.
@@ -50,13 +54,19 @@ Plain version: Pi can use your existing login without loading your usual extra t
 ## File tools and their limits
 
 Pi reading tools are `read`, `ls`, `find`, and `grep`; write mode adds `edit` and `write`.
-The broker handles bounded UTF-8 text files with descriptor-relative, no-symlink traversal.
-It rejects hidden/control paths, parent traversal, files outside authorized roots, and multiply linked or special files.
+The broker handles bounded UTF-8 text files with descriptor-relative access.
+Restricted tools reject symlinks; trusted tools resolve ordinary internal aliases and recheck that the resolved path stays inside the permitted roots.
+Repository `AGENTS.md` and `CLAUDE.md` files are readable.
+Trusted workers can also read and edit ordinary project configuration such as `.gitignore`, `.github`, and instruction files.
+Credential files, orchestration control state, Git metadata, paths outside authorized roots, and multiply linked or special files remain excluded from these file tools.
+An individual file access error is recoverable: the model can correct its path and continue without restarting the task.
 Writes are confined to a separate worker checkout; the source project is readable but not writable through these tools.
 `grep` uses literal text, not regular expressions.
-Neither worker executor grants shell commands or test execution; verification must be performed separately by the operator or an authorized external process.
+Command-enabled restricted workers use the configured sandbox; trusted workers can build and test with host access.
+Trusted commands receive host toolchain paths and the user home for installed tools and Git identity, but API-key environment variables are not copied into commands.
+Trusted command execution is unsandboxed and does not inherit file-tool path containment.
 These are model-tool controls, not hostile-process isolation or an OS sandbox.
-Plain version: the model can read files and make allowed edits, but cannot run commands or tests through its tools.
+Plain version: guarded tools only read or edit allowed files, while trusted commands can do more and must be used with care.
 
 ## Normalized results
 
@@ -72,7 +82,9 @@ This list can include auxiliary calls and is not evidence of one uniquely identi
 Its resumed-session cost scope is not established, so reported values must not be summed as verified per-turn spending.
 
 Pi requires a verified 0.99.2 preflight, a diagnostic session header, matched message and tool events, a successful final assistant message, and settlement with no later activity.
-Retries, compaction, model changes, failed tools, unexpected events, incomplete tools, and truncated output fail closed.
+Ordinary tool errors may be followed by corrective calls and a successful final result.
+Unoffered tools, broken protocol, retries, compaction, model changes, unexpected events, incomplete tools, and truncated output still reject the result.
+Preflight failures retain an actionable owned diagnostic instead of reporting only an exit code.
 Pi returns `session_id=None` and `cost_usd=None`.
 A legacy Codex transcript decoder remains for compatibility, but direct Codex execution is not supported.
 Plain version: an answer counts only after the expected program finishes cleanly with the requested model and tools.
@@ -85,5 +97,6 @@ Neither builder nor parser mutates the process-global environment.
 A frontend disconnect is not cancellation; cancelled or uncertain attempts are not silently replayed or accepted.
 No per-role dollar cap is configured.
 Worker results additionally require structured reports and, for writes, program-captured workspace provenance before becoming candidates.
-Only explicit operator acceptance completes their graph nodes; see [workers](workers.md).
-Plain version: the supervisor records each job, stops cancelled work, and keeps completed changes waiting for your review.
+Checked acceptance through `accept_worker`, the optional CLI, or standing `execution.unattended` authorization completes graph nodes; see [workers](workers.md).
+Unattended acceptance requires an explicit empty `remaining_issues` list and satisfied live gates, and never grants required worker approval.
+Plain version: the supervisor records each job and accepts it only under the project's authorization rules.

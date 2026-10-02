@@ -187,6 +187,15 @@ def bootstrap(
         (ROOT / "roles/orchestrator.md").read_text()
         + "\n\nUser preferences:\n"
         + encode(config["personalization"])
+        + "\nPlanning preferences:\n"
+        + encode(
+            {
+                "clarification": config["planning"].get("clarification", "material"),
+                "standing_execution_authorization": config["execution"].get("unattended", False),
+                "execution_mode": config["execution"].get("mode", "restricted"),
+                "base_ref": config["execution"].get("base_ref", "HEAD"),
+            }
+        )
     )
     instructions += (
         f"\nCoordinator instance: {session_id}. Use shared tools to select/register and bind one project, "
@@ -218,7 +227,7 @@ def bootstrap(
             "through the installed pi-subagents plugin, using a local provider with no LLM calls. "
             "Inspect /agents for observers and final results. Live FleetView and partial text are "
             "not guaranteed. If stopped or unavailable, use observe_worker with request_id for "
-            "explicit reattachment. Never launch arbitrary native Agent work. Native Stop detaches "
+            "explicit reattachment. Never launch duplicate native work merely to obtain visibility. Native Stop detaches "
             "only the observer; cancel the real task through cancel_task. "
             "Plain version: Pi shows a helper that reads the existing job, without another AI worker."
         )

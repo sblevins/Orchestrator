@@ -57,9 +57,10 @@ def migrate(database):
         import sqlite3
 
         statement = ""
+        from .team_messages import SCHEMA as MESSAGE_SCHEMA
         from .teams import SCHEMA as TEAM_SCHEMA
 
-        for line in (SCHEMA_V2 + TEAM_SCHEMA).splitlines():
+        for line in (SCHEMA_V2 + TEAM_SCHEMA + MESSAGE_SCHEMA).splitlines():
             statement += line + "\n"
             if sqlite3.complete_statement(statement):
                 database.execute(statement)
@@ -318,7 +319,7 @@ class WorkerService:
         self._unlaunched(request)
         # Unattempted requests follow conversational policy changes automatically.
         status = self.policy(request["project_id"])
-        if source.startswith("monitor:"):
+        if source.startswith(("monitor:", "standing:")):
             self._fresh(request)
         if status.get("digest") != request["policy_digest"]:
             digest, error, evidence = self._snapshot(database, request["project_id"])
@@ -564,6 +565,27 @@ class WorkerService:
                     raise StateError("Monitor request context is stale")
             self._plan_gate(database, request)
             if isinstance(selection["choice"], dict) and "classification" in selection["choice"]:
+                configuration = load_config(self.store.home, request["project_id"])
+                if configuration["execution"].get("unattended", False):
+                    choice = {
+                        "classification": selection["choice"]["classification"],
+                        "rationale": "Standing project routing recommendation: "
+                        + str(selection["choice"].get("rationale", ""))[:4000],
+                    }
+                    snapshot = json.loads(
+                        database.execute(
+                            "SELECT policy_json FROM worker_policies WHERE digest=?",
+                            (request["policy_digest"],),
+                        ).fetchone()[0]
+                    )
+                    route = snapshot.get("classifications", {}).get(choice["classification"], {})
+                    profiles = route.get("team", [route])
+                    if not profiles or any("effort" not in profile for profile in profiles):
+                        choice["difficulty"] = configuration["execution"].get(
+                            "worker_difficulty", "hard"
+                        )
+                    self._select(database, request, choice, "standing:" + current["id"])
+                    continue
                 self.store._event(
                     database,
                     request["project_id"],
@@ -674,8 +696,14 @@ class WorkerService:
         if not request["profile"]:
             raise StateError("Worker has no pinned profile")
         source = request["selection_source"] or ""
-        if source.startswith("monitor:"):
-            monitor = database.execute("SELECT * FROM tasks WHERE id=?", (source[8:],)).fetchone()
+        if source.startswith(("monitor:", "standing:")):
+            if source.startswith("standing:") and not load_config(
+                self.store.home, request["project_id"]
+            )["execution"].get("unattended", False):
+                raise StateError("Standing project execution is disabled")
+            monitor = database.execute(
+                "SELECT * FROM tasks WHERE id=?", (source.split(":", 1)[1],)
+            ).fetchone()
             if (
                 not monitor
                 or monitor["role"] != "monitor"
@@ -764,7 +792,13 @@ class WorkerService:
 
                     try:
                         root = _plain_path(self.store.project(request["project_id"])["root"])
-                        baseline = _git(root, "rev-parse", "HEAD")
+                        baseline = _git(
+                            root,
+                            "rev-parse",
+                            "--verify",
+                            "--end-of-options",
+                            config["execution"].get("base_ref", "HEAD") + "^{commit}",
+                        )
                         teams.start(self, database, request, baseline_commit=baseline)
                     except (WorkspaceError, OSError) as error:
                         database.execute(
@@ -787,6 +821,7 @@ class WorkerService:
                     "policy_digest": request["policy_digest"],
                     "project_root": self.store.project(request["project_id"])["root"],
                     "dependency_commits": commits,
+                    "base_ref": config["execution"].get("base_ref", "HEAD"),
                 }
                 lineage = teams.member(database, request["id"])
                 if lineage:

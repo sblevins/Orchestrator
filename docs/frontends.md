@@ -12,9 +12,12 @@ See [worker visibility](worker-visibility.md) for Claude-only Haiku watchers and
 Run `claude` or `pi` directly from `~/Agents/Orchestrator`.
 Claude discovers `CLAUDE.md`, project lifecycle hooks, and `.mcp.json`; Pi discovers `AGENTS.md` and `.pi/extensions/orchestrator.ts`.
 Native trust prompts still require user approval.
-The coordinator asks for a project, binds the instance, loads notes/status and initial setup state, and starts the shared supervisor as needed.
-Both frontends expose `project_setup` and `setup_project`, so creating and validating the initial worker policy is possible from the conversation.
-These narrowly scoped setup writes do not require Bash and do not grant source changes or execution approval.
+The coordinator asks for a project, binds the instance, loads notes/status and project setup state, and starts the shared supervisor as needed.
+Both frontends expose `project_setup` and repeatable `setup_project` for routing drafts, updates, and repairs, plus `project_settings` and `configure_project` for project settings.
+The active bound coordinator can configure its project at any time, with no initial setup seal or operator handoff.
+Routing writes touch only the bound project's `.orchestrator/crew-dispatch.json`; settings writes touch only private `<home>/config/projects/<bound-id>.json`.
+Scoped writes never modify another project or shared defaults.
+These narrowly scoped writes do not require Bash and do not themselves grant source changes or execution approval.
 The coordinator asks for missing worker preferences instead of requiring operator commands or choosing models without your direction.
 Plain version: open the normal chat program here; the project supplies its coordinator setup automatically.
 
@@ -74,11 +77,14 @@ Plain version: seeing a message does not mark the problem as solved.
 The launcher generates owner-only hook settings with absolute installed paths, so a separate private home does not break hooks.
 It loads user settings plus its generated settings, excluding project/local settings to avoid registering the repository hooks twice.
 Launched frontends receive the configured role and personalization through a private prompt file; native startup supplies them through Claude hook context or Pi prompt sections.
-Claude PreToolUse and Pi tool-call guards block implementation tools and unrelated plugin tools, even when the native interface exposes them.
-Initial policy setup is an explicit owned-tool exception to foreground read-only behavior, not a blanket shell bypass.
+In guarded mode, Claude PreToolUse and Pi tool-call guards block implementation tools and unrelated plugin tools, even when the native interface exposes them.
+`execution.mode = "trusted"` permits native foreground tools; it is not an OS sandbox or permission to exceed the user's project request.
+Repeatable project routing and settings APIs are explicit owned-tool exceptions to foreground read-only behavior, not a blanket shell bypass.
+Project-scoped decision APIs also support authorized approvals, hold resolution, and explicit worker acceptance; the operator CLI remains optional.
 The ordinary local Claude MCP configuration uses an explicit session ID from startup context, and the hook rejects attempts to use another instance's ID.
 Configured read tools are translated into the native frontend allowlist; file-edit tools and untracked worker dispatch remain blocked.
-Claude Agent is permitted only for an exact prepared watcher invocation; Pi spawns observers through its owned public-RPC integration, not unrestricted Agent tools.
+In guarded mode, Claude Agent is permitted only for an exact prepared watcher invocation; Pi spawns observers through its owned public-RPC integration.
+The monitor waits for foreground completion and `monitoring.quiet_seconds` (20 by default); only blocking monitor findings interject, while info and warning findings remain silent.
 Generated Claude MCP settings live at `data/frontend/<session-id>.mcp.json` with owner-only permissions and an absolute CLI path.
 The generated server receives the launcher-owned session ID rather than a model-supplied identity.
 Notes and worker output are untrusted task data, not permission to change scope or approve work.

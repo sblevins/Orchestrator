@@ -429,6 +429,50 @@ class WorkerTests(unittest.TestCase):
             )
         )
 
+    def test_standing_authorization_routes_without_waiting_for_foreground(self):
+        from orchestrator.config import load_config
+        from orchestrator.project_settings import configure_project
+
+        configuration = patch("orchestrator.workers.load_config", side_effect=load_config)
+        configuration.start()
+        self.addCleanup(configuration.stop)
+        configure_project(
+            self.store,
+            "session",
+            {
+                "execution": {
+                    "unattended": True,
+                    "worker_difficulty": "easy",
+                }
+            },
+        )
+        profile = {key: value for key, value in PROFILE.items() if key != "effort"}
+        self.policy_path.write_text(encode({"classifications": {"audit": profile}}))
+        self.plan()
+        request = next(item for item in self.workers.list("project") if item["node_id"] == "a")
+        task, report = self.monitor(
+            selections=[
+                {
+                    "request_id": request["id"],
+                    "choice": {
+                        "classification": "audit",
+                        "effort": "max",
+                        "rationale": "Inspect source",
+                    },
+                }
+            ]
+        )
+        self.apply(task, report)
+        selected = self.workers.get(request["id"])
+        self.assertEqual(selected["selection_source"], "standing:" + task["id"])
+        self.assertEqual(selected["profile"]["effort"], "low")
+        configure_project(self.store, "session", {"execution": {"unattended": False}})
+        self.workers.dispatch_ready()
+        self.assertIsNone(self.workers.get(request["id"])["task_id"])
+        configure_project(self.store, "session", {"execution": {"unattended": True}})
+        self.workers.dispatch_ready()
+        self.assertIsNotNone(self.workers.get(request["id"])["task_id"])
+
     def test_captain_rule_requires_extra_approval(self):
         self.policy_path.write_text(
             encode({"rules": [{"when": "Any work", "use": PROFILE, "approval": "captain"}]})

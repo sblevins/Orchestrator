@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -101,7 +102,16 @@ def build_command(
 
 
 def build_pi_command(
-    config, settings, prompt, cwd, output_path, *, project_root=None, stdin_prompt=True, mode="read"
+    config,
+    settings,
+    prompt,
+    cwd,
+    output_path,
+    *,
+    project_root=None,
+    stdin_prompt=True,
+    mode="read",
+    worker_context=None,
 ):
     """Build an owned SDK bridge invocation, never execute a configured CLI directly.
 
@@ -109,7 +119,7 @@ def build_pi_command(
     time and then starts the pinned SDK with canonical auth and no discovery.
     """
     try:
-        validate_executor(settings)
+        validate_executor(settings, allow_effort_selector=True)
     except ConfigurationError as error:
         raise AdapterError(str(error)) from error
     if settings.get("adapter", settings.get("harness")) != "pi":
@@ -151,10 +161,21 @@ def build_pi_command(
         "model": settings["model"],
         "effort": settings["effort"],
         "mode": mode,
+        "trusted": config.get("execution", {}).get("mode") == "trusted",
         "tools": selected,
         "cwd": _argument(str(cwd), "cwd"),
         "project_root": _argument(str(project_root), "project_root") if project_root else None,
     }
+    if mode == "write" and config.get("images", {}).get("enabled", False):
+        selected.append("generate_image")
+        options["images"] = dict(config["images"])
+        options["image_state_directory"] = str(Path(output_path).parent / "image-requests")
+    if worker_context is not None:
+        options.update(
+            worker_tool_options(config, mode, cwd, project_root, output_path, worker_context)
+        )
+        selected.extend(options["tool_names"])
+    options["tool_names"] = list(selected)
     if not stdin_prompt:
         options["prompt"] = prompt
     return [
@@ -164,6 +185,48 @@ def build_pi_command(
         "launch",
         json.dumps(options, ensure_ascii=True, allow_nan=False),
     ]
+
+
+def worker_tool_options(config, mode, cwd, project_root, output_path, worker_context):
+    """Capture host policy; model arguments cannot change execution authority."""
+    options = {"worker_context": dict(worker_context), "tool_names": []}
+    if config.get("worker", {}).get("team_parent"):
+        options["tool_names"] += ["send_team_message", "read_team_messages"]
+    commands = config.get("commands", {})
+    trusted = config.get("execution", {}).get("mode") == "trusted"
+    if commands.get("enabled", False) or trusted:
+        options["tool_names"].append("run_command")
+        options["commands"] = {
+            "cwd": str(cwd),
+            "project_root": str(project_root or cwd),
+            "mode": mode,
+            "artifact_directory": str(Path(output_path).parent / "command-artifacts"),
+            "sandbox": False if trusted else commands.get("sandbox", True),
+            "network": commands.get("network", False),
+            "timeout_seconds": commands.get("timeout_seconds", 120),
+            "cpus": config.get("supervisor", {}).get("task_cpus", 1),
+            "tool_paths": dict(commands.get("tool_paths", {})),
+            "host_environment": {
+                key: os.environ[key]
+                for key in (
+                    "PATH",
+                    "HOME",
+                    "XDG_CONFIG_HOME",
+                    "XDG_CACHE_HOME",
+                    "CARGO_HOME",
+                    "RUSTUP_HOME",
+                    "GOPATH",
+                    "GOMODCACHE",
+                    "PNPM_HOME",
+                    "NVM_BIN",
+                    "VIRTUAL_ENV",
+                )
+                if key in os.environ
+            }
+            if trusted
+            else {},
+        }
+    return options
 
 
 def _unique_object(pairs):
@@ -232,7 +295,19 @@ def _text(value):
 def _parse_pi_result(stdout, returncode):
     """Accept only the owned bridge's verified, settled, clean one-run protocol."""
     if type(returncode) is not int or returncode != 0:
-        raise AdapterError(f"pi exited unsuccessfully: {returncode!r}")
+        detail = ""
+        if isinstance(stdout, str) and len(stdout) <= 32 * 1024 * 1024:
+            try:
+                diagnostics = [
+                    event.get("error")
+                    for event in _events(stdout)
+                    if event["type"] == "orchestrator_pi_error"
+                ]
+                if diagnostics and isinstance(diagnostics[-1], str):
+                    detail = ": " + diagnostics[-1][:1000]
+            except (ValueError, TypeError):
+                pass
+        raise AdapterError(f"pi exited unsuccessfully: {returncode!r}{detail}")
     try:
         output_size = len(stdout.encode("utf-8", "strict")) if isinstance(stdout, str) else 0
     except UnicodeError as error:
@@ -256,7 +331,8 @@ def _parse_pi_result(stdout, returncode):
         or preflight.get("verified") is not True
         or preflight.get("version") != "0.99.2"
         or preflight.get("mode") not in ("read", "write")
-        or preflight.get("effort") not in ("off", "minimal", "low", "medium", "high", "xhigh")
+        or preflight.get("effort")
+        not in ("off", "minimal", "low", "medium", "high", "xhigh", "max")
         or header.get("type") != "session"
         or header.get("version") != 3
     ):
@@ -269,7 +345,8 @@ def _parse_pi_result(stdout, returncode):
     tools = preflight.get("tools")
     allowed = {"read", "ls", "find", "grep"}
     if preflight["mode"] == "write":
-        allowed |= {"edit", "write"}
+        allowed |= {"edit", "write", "generate_image"}
+    allowed |= {"run_command", "send_team_message", "read_team_messages"}
     if (
         not isinstance(tools, list)
         or any(not isinstance(tool, str) for tool in tools)
@@ -283,6 +360,7 @@ def _parse_pi_result(stdout, returncode):
     requested = {}
     executing = set()
     completed = set()
+    tool_errors = {}
     tool_results = set()
     for event in records[2:]:
         kind = event["type"]
@@ -357,7 +435,8 @@ def _parse_pi_result(stdout, returncode):
                     not isinstance(call_id, str)
                     or call_id not in completed
                     or call_id in tool_results
-                    or message.get("isError") is not False
+                    or type(message.get("isError")) is not bool
+                    or message.get("isError") != tool_errors[call_id]
                     or message.get("toolName") != requested[call_id]
                 ):
                     raise AdapterError("Pi tool result failed or mismatched")
@@ -383,12 +462,13 @@ def _parse_pi_result(stdout, returncode):
             if (
                 not isinstance(call_id, str)
                 or call_id not in executing
-                or event.get("isError") is not False
+                or type(event.get("isError")) is not bool
                 or event.get("toolName") != requested[call_id]
             ):
                 raise AdapterError("Pi tool failed or did not start")
             executing.remove(call_id)
             completed.add(call_id)
+            tool_errors[call_id] = event["isError"]
         elif kind == "turn_end":
             if not turn or opened_message or executing or event.get("message") != final:
                 raise AdapterError("invalid Pi turn end")
@@ -438,7 +518,34 @@ def _parse_pi_result(stdout, returncode):
                 raise AdapterError("invalid final Pi text")
             _argument(block["text"], "Pi final text", allow_empty=True)
             texts.append(block["text"])
-    return {"text": _text("\n".join(texts)), "session_id": None, "cost_usd": None}
+    result = {"text": _text("\n".join(texts)), "session_id": None, "cost_usd": None}
+    if "requested_model" in preflight:
+        from .models import selector_family
+
+        requested_model = _argument(preflight["requested_model"], "requested Pi model")
+        requested_effort = _argument(preflight.get("requested_effort"), "requested Pi effort")
+        supported = preflight.get("supported_efforts")
+        effort_order = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+        if (
+            not isinstance(supported, list)
+            or not supported
+            or any(level not in effort_order for level in supported)
+            or supported != sorted(set(supported), key=effort_order.index)
+            or preflight["effort"] not in supported
+            or (requested_effort == "max-supported" and preflight["effort"] != supported[-1])
+            or (requested_effort != "max-supported" and requested_effort != preflight["effort"])
+        ):
+            raise AdapterError("Pi effort resolution does not match its requested selector")
+        result["model_selection"] = {
+            "requested_model": requested_model,
+            "family": selector_family(requested_model),
+            "reported_models": [model],
+            "reported_models_scope": "selected Pi SDK model",
+            "requested_effort": requested_effort,
+            "resolved_effort": preflight["effort"],
+            "supported_efforts": supported,
+        }
+    return result
 
 
 def parse_result(adapter: str, stdout: str, returncode: int) -> dict:

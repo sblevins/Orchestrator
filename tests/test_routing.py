@@ -192,7 +192,7 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(result["model"], "test-model")
 
     def test_supported_pi_efforts_and_no_downgrade(self):
-        for effort in ("off", "minimal", "low", "medium", "high", "xhigh"):
+        for effort in ("off", "minimal", "low", "medium", "high", "xhigh", "max", "max-supported"):
             profile = {**self.profile, "effort": effort}
             self.assertEqual(
                 resolve_selection({"default": profile}, {**self.choice, "effort": effort})[
@@ -200,7 +200,7 @@ class RoutingTests(unittest.TestCase):
                 ],
                 effort,
             )
-        for effort in ("max", "ultra"):
+        for effort in ("ultra", "extreme"):
             with self.subTest(effort=effort), self.assertRaisesRegex(RoutingError, "unsupported"):
                 resolve_selection(
                     {"default": {**self.profile, "effort": effort}},
@@ -284,7 +284,7 @@ class RoutingTests(unittest.TestCase):
         result = resolve_selection(None, choice, operator_override=True)
         self.assertEqual(result["rule"], "override")
         self.assertTrue(result["requires_approval"])
-        for changes in ({"harness": "codex"}, {"effort": "max"}, {"model": "claude-test"}):
+        for changes in ({"harness": "codex"}, {"effort": "ultra"}, {"model": "claude-test"}):
             with self.subTest(changes=changes), self.assertRaises(RoutingError):
                 resolve_selection(None, {**choice, **changes}, operator_override=True)
         with self.assertRaises(RoutingError):

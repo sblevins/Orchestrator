@@ -1,4 +1,5 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { isPiFamily, resolveWorkerModel } from "../../orchestrator/pi_models.mjs";
 
 /** Only these bare names opt into family selection. Exact IDs are never normalized. */
 export function isAnthropicFamily(requested: string): boolean {
@@ -50,6 +51,12 @@ function compareVersions(left: VersionRank, right: VersionRank): number {
 export function resolveForegroundModel(registry: CatalogRegistry, provider: string, requested: string): Model<Api> {
   const exact = registry.find(provider, requested);
   if (exact) return exact;
+  if (isPiFamily(requested)) {
+    return resolveWorkerModel({
+      getModel: (providerId: string, id: string) => registry.find(providerId, id),
+      getModels: (providerId: string) => registry.getAll().filter(model => model.provider === providerId),
+    }, provider, requested);
+  }
   if (provider === "anthropic" && isAnthropicFamily(requested)) {
     let best: { model: Model<Api>; rank: VersionRank } | undefined;
     let ambiguous = false;

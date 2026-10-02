@@ -18,7 +18,7 @@ class ClassificationRoutingTests(unittest.TestCase):
             for difficulty, effort in (
                 ("easy", "low"),
                 ("hard", "high"),
-                ("very hard", "xhigh" if classification == "coding" else "max"),
+                ("very hard", "max-supported" if classification == "coding" else "max"),
             ):
                 with self.subTest(classification=classification, difficulty=difficulty):
                     result = resolve_selection(
@@ -118,7 +118,7 @@ class ClassificationRoutingTests(unittest.TestCase):
             {"unknown": {"pi": "low"}},
             {"hard": "high"},
             {"hard": {}},
-            {"hard": {"pi": "max"}},
+            {"hard": {"pi": "ultra"}},
             {"hard": {"codex": "high"}},
             {"hard": {"pi": []}},
             {"very hard": {"pi": "high"}, "very-hard": {"pi": "low"}},
@@ -133,7 +133,7 @@ class ClassificationRoutingTests(unittest.TestCase):
         policy = {"classifications": {"coding": {"team": [self.pi, self.claude]}}}
         original = deepcopy(policy)
         result = resolve_selection(policy, {**self.choice, "difficulty": "very-hard"})
-        self.assertEqual([peer["effort"] for peer in result["team"]], ["xhigh", "max"])
+        self.assertEqual([peer["effort"] for peer in result["team"]], ["max-supported", "max"])
         self.assertEqual(result["rule"], "coding")
         self.assertIsNone(result["candidate"])
         self.assertFalse(result["requires_approval"])
@@ -176,7 +176,7 @@ class ClassificationRoutingTests(unittest.TestCase):
         for team in invalid:
             with self.subTest(team=team), self.assertRaises(RoutingError):
                 validate_policy({"classifications": {"coding": {"team": team}}})
-        with self.assertRaisesRegex(RoutingError, "combined"):
+        with self.assertRaisesRegex(RoutingError, "supports team"):
             validate_policy(
                 {
                     "classifications": {

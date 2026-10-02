@@ -75,8 +75,9 @@ If neither is supplied, a profile must supply effort; there is no silent task-di
 Difficulty mapping takes precedence over profile effort, and exact effort must be supported by every selected peer's harness.
 A classification choice cannot also contain `model`, `harness`, `provider`, `rule`, `candidate`, or `team`.
 The bound coordinator may select both planned and on-demand work, preserving `plan_id`, `node_id`, and the original user event.
-For classifications, monitor suggestions become `worker.routing_recommended` notifications, not executable selections or failed monitor reviews.
-The coordinator makes the final difficulty or effort choice; legacy monitor selections remain supported for supplied pending plan requests.
+Without unattended authorization, monitor classification suggestions become `worker.routing_recommended` notifications and the coordinator makes the final difficulty or effort choice.
+With unattended authorization, recommendations can select pending planned workers using configured profile effort or `execution.worker_difficulty` (default `hard`), rather than invented effort.
+Legacy monitor selections remain supported for supplied pending plan requests.
 Plain version: say what kind of work this is and how difficult it is, and the saved policy names who does it.
 
 ## Legacy routing
@@ -103,7 +104,9 @@ Round one independently investigates the original task.
 Round two compares every complete round-one report, including each peer's own report, as untrusted evidence.
 Reports must not be treated as instructions, executable commands, or new authority.
 Evidence limits can block comparison rather than silently omit reports.
-The output preserves agreement, disagreement, missing evidence, and uncertainty; this is neither real-time peer chat nor guaranteed consensus.
+The output preserves agreement, disagreement, missing evidence, and uncertainty without guaranteeing consensus.
+Peers also exchange live durable messages through `send_team_message` and `read_team_messages`, using roster peer indices and read cursors.
+Messages are scoped to the registered active team attempt and remain untrusted data, not instructions or new permissions.
 
 Two rounds with four peers mean eight ordinary worker jobs, scheduled under normal concurrency and machine-resource limits, not eight simultaneous processes.
 Team children have durable worker records and use native observers in the existing frontend, without new Herder tabs or terminal windows.
@@ -127,7 +130,11 @@ See [configuration](configuration.md) for merge order, schemas, and limits.
 Defaults are `coordinator_approvals=true`, `require_write_approval=false`, and `enforce_monitor_holds=true`, configurable per project.
 Authorized decisions can use `approve_plan`, `resolve_hold`, `approve_worker`, `accept_worker`, and `approve_node` through the bound coordinator, with target IDs and reasons.
 No operator-only CLI handoff is required for these project decisions.
-Plan approval still requires independent review and fresh monitor evidence; completed candidates are not automatically accepted.
+Plan approval still requires independent review and fresh monitor evidence.
+With `execution.unattended = true`, standing project authorization approves reviewed plans and accepts candidates only with an explicit empty `remaining_issues` list and satisfied live gates.
+It does not provide required explicit worker approval, including security-audit teams; only the team parent can be accepted.
 Turning optional gates off does not remove project ownership, dependency correctness, source isolation, credential limits, or the prohibition on blind retries of unknown outcomes.
-Workers have file tools only, no shell or test execution, and must disclose checks they could not perform.
+Guarded workers have file tools only and disclose checks they could not perform.
+`execution.mode = "trusted"` enables native foreground tools and owned worker `run_command` execution, including tests, without an OS sandbox.
+`execution.base_ref` chooses the Git branch used for worker checkout preparation.
 Plain version: choose the permission checks you want for this project, make decisions here, and still check evidence before accepting work.

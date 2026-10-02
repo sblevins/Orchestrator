@@ -212,6 +212,8 @@ def _read_hook_input() -> dict:
 
 
 def watch(home: Path, session_id: str, seconds: float) -> int:
+    from .monitoring import delivery_updates
+
     if not 0 < seconds <= 27000:
         raise StateError("Watcher duration must be between 0 and 27000 seconds")
     store = Store(home)
@@ -228,7 +230,10 @@ def watch(home: Path, session_id: str, seconds: float) -> int:
             session = store.session(session_id)
             if not session["active"]:
                 return 0
-            pending = store.updates(session_id)
+            quiet_seconds = load_config(home, session["project_id"])["monitoring"].get(
+                "quiet_seconds", 20
+            )
+            pending = delivery_updates(store, session_id, quiet_seconds)["interrupting"]
             if pending:
                 previous = json.loads(store.service_value(f"wake:{session_id}", "{}"))
                 latest = pending[-1]["id"]

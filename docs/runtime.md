@@ -44,7 +44,8 @@ In plain English: uncertain work is reported as uncertain, not silently repeated
 Each attempt stores artifacts in a private directory below `data/runs/TASK/TOKEN`.
 Write workers execute in isolated Git worktrees; read workers have only controlled reading tools.
 The complete prompt is saved in `prompt.txt`, including the tracked role instructions, personalization, canonical source-root context, and task evidence.
-Core specialists have read-only tools; authorized write workers add file editing tools, not a shell.
+Core specialists have read-only tools; authorized write workers add file editing tools.
+Trusted workers additionally have owned `run_command` for unsandboxed command and test execution.
 No permission bypass is added.
 Claude receives the canonical project root through `--add-dir`; Pi uses owned path-limited file tools without inherited orchestration integrations.
 A private working directory and read-only tools are not a hostile-process isolation boundary.
@@ -66,6 +67,7 @@ A scope change invalidates all live old plans, including drafting and reviewing 
 Planner failures do not automatically retry, and neither a critique nor a revision executes workers.
 
 Monitor scheduling coalesces persisted review-worthy events and includes notes, project state, and the exact `reviewed_through` cursor in a persisted snapshot prompt.
+It waits for foreground completion and `monitoring.quiet_seconds` (20 by default); only blocking monitor findings interject, while info and warning findings remain silent.
 Routine messages marked `review_required=false` do not independently wake a monitor but remain available in the next eligible snapshot.
 Monitor-generated events do not recursively trigger monitoring.
 The store rejects responses naming any other cursor and applies exponential backoff to failures.
@@ -84,11 +86,15 @@ Neither adapter has a configured per-role dollar cap; timeouts and machine-resou
 ## Worker lifecycle
 
 Policy snapshots pin the chosen provider, model, effort, and routing rationale before dispatch.
-Plan requests receive selections only from an accepted monitor response that actually received those requests.
-Unrelated requests receive selections from the owning foreground coordinator.
-Operator approval, policy freshness, scope version, holds, pauses, dependencies, and leases are rechecked before execution.
+The bound coordinator selects both planned and on-demand workers.
+Accepted monitor responses may select supplied pending legacy plan requests.
+Classification suggestions are recommendations unless unattended authorization permits selection using configured profile effort or `execution.worker_difficulty`.
+Current project permissions, required approvals, policy freshness, scope version, holds, pauses, dependencies, and leases are rechecked before execution.
+Project permissions remain live controls rather than frozen task settings.
 The worker service validates structured reports separately from the harness terminal protocol.
 Program-captured worktree/diff/commit evidence stays separate from the worker's claims.
-A successful worker is a candidate awaiting operator acceptance, not an automatically successful graph node.
+A successful worker is a candidate, not an automatically successful graph node.
+Checked acceptance uses the bound `accept_worker` API, optional CLI, or standing `execution.unattended` authorization with an explicit empty `remaining_issues` list and satisfied live gates.
+Unattended progression never creates explicit worker approval required by policy, including security-audit teams.
 Only accepted prerequisites release dependent work.
 Plain version: save who was chosen and why, check permission again before starting, and wait for review before using the result.

@@ -63,9 +63,11 @@ Those three permission values are the defaults, and each must be a boolean.
 Use `approve_plan(plan_id, reason)`, `resolve_hold(hold_id, reason)`, `approve_worker(request_id, reason)`, `accept_worker(request_id, reason)`, and `approve_node(plan_id, node_id, reason)` for authorized decisions in this project.
 Use `cancel_worker(request_id, reason)` for a worker or entire comparison team.
 Plan approval still requires independent review and fresh monitor evidence.
-Candidate results are never automatically accepted, and only a team's parent request can be accepted.
-Project ownership, dependency correctness, no blind retry of unknown outcomes, isolated source workspaces, file-tool-only workers without shell, and credential limits remain intrinsic boundaries.
-Plain version: optional permission checks are your project preferences, but workers still cannot change other projects or skip required work.
+`execution.unattended = true` supplies standing project authorization for reviewed-plan approval and candidate acceptance only when `remaining_issues` is explicitly empty and live gates pass.
+It never supplies policy-required explicit worker approval, including security-audit teams; only a team's parent request can be accepted.
+Project ownership, dependency correctness, no blind retry of unknown outcomes, isolated source workspaces, and credential limits remain intrinsic boundaries.
+Restricted workers have file tools by default and may enable sandboxed commands; trusted commands are unsandboxed.
+Plain version: project permission settings do not allow skipping required work, and trusted commands need care because they can act outside the project.
 
 ## Supervisor and personalization
 
@@ -76,7 +78,7 @@ Timing values are finite numbers from 0.1 through 86400 seconds; stale time must
 Parallelism is an integer from 1 through 64, and monitor batches contain 1 through 10000 events.
 Boolean values are not numbers.
 `personalization.name` and `personalization.communication_style` are nonempty strings.
-Defaults request concise, neutral, practical responses, independent evidence, no pirate language, and no automatic approval of code execution or permission requests.
+Defaults request concise, neutral, practical responses, independent evidence, no pirate language, and adherence to project-specific standing authorization without invented repeated approvals.
 These preferences inform prompts; they do not replace adapter permission enforcement.
 
 ## Planning graphs and workflows
@@ -85,19 +87,20 @@ These preferences inform prompts; they do not replace adapter permission enforce
 `planning.workflow` defaults to `"plan-review"` and selects a workflow template by name, not by path.
 Names follow the same safe identifier rules as project identifiers: 1-128 ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit.
 `planning.max_review_rounds` defaults to 3 and accepts integers from 1 through 100, excluding booleans.
+`planning.clarification` defaults to `material`, with `always` and `none` also accepted; role instructions should settle material unknowns before a paid planner call.
 Reaching this limit does not mean the critic approved the plan.
 
-Tracked templates live at `workflows/<name>.json`; private replacements live at `<home>/config/workflows/<name>.json` and take precedence for that name.
-Select the name in local or project TOML to customize the workflow.
-There are no configurable template-directory or arbitrary-path settings.
+Use `configure_project` to save project-local `planning.templates` in private `<home>/config/projects/<bound-id>.json` and `planning.workflow` to select one.
 `planning.templates` optionally maps up to 64 safe names to complete plan graph objects with `summary`, `assumptions`, `risks`, `questions`, and `nodes`.
 These inline templates are validated during configuration and take precedence over file templates of the same name.
-Use `configure_project` to save them conversationally and `planning.workflow` to select one.
+Tracked templates live at `workflows/<name>.json`; shared private replacements live at `<home>/config/workflows/<name>.json` and take precedence over tracked files for that name.
+The home workflow directory is administrator-only shared customization, never a project-scoped edit destination.
+There are no configurable template-directory or arbitrary-path settings.
 For file templates, the config loader validates the selected name only; the graph module owns loading, missing-template errors, graph validation, and path containment checks.
 A valid configuration is not proof that a selected file template exists or is valid.
 Protect private workflow templates with the same file permissions as private TOML overrides.
-Plain version: choose a workflow by its short name, and put your customized version in the private workflow folder.
-The program must check that file before using it.
+Plain version: ask in chat to save and select this project's task order without changing shared settings.
+Shared workflow files are for administrator changes that may affect multiple projects.
 
 The planner must return a JSON object with `summary` as a string, `assumptions`, `risks`, and `questions` as string lists, and `nodes` as a list of node objects.
 Each node has string `id`, `title`, and `description` fields; string lists `depends_on` and `acceptance_criteria`; and `kind` equal to `work`, `review`, or `approval`.
@@ -133,7 +136,7 @@ Exact model identifiers are passed unchanged.
 Claude Code also accepts case-insensitive family names `Opus`, `Sonnet`, `Haiku`, and `Fable`; other models use Pi with an explicit `provider` setting.
 These requested identifiers are not a claim of provider availability; configure the exact identifier your provider supports.
 Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Pi efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
-No model-specific effort assumptions or silent fallbacks are applied.
+Explicit efforts never silently fall back; `max-supported` is an intentional capability-based selector, not an effort downgrade.
 Plain version: you can change any model name, but the chosen command must support the effort setting and the provider must actually offer that model.
 
 The shared supervisor task timeout ranges from 1 through 86400 seconds, and shared task/frontend CPU reservations range from 1 through 64.
@@ -154,12 +157,15 @@ Commands are argv lists containing exactly one nonempty executable name or path.
 All additional arguments are rejected because the adapter owns sandbox, permission, and tool flags.
 Known dangerous bypass spellings are also rejected in the executable entry.
 Executable paths are trusted administrator selections; validation cannot prove an arbitrary executable is safe.
-There is no shell interpolation and no automatic approval setting.
+Specialist argv is not shell-interpolated, and native permission prompts are not automatically approved.
 
 ## Model families or exact versions
 
 Set `model` to a family name to follow the harness-supported family release, or to a full model ID to request a particular version.
-The supported bare families are `Opus`, `Sonnet`, `Haiku`, and `Fable`, in any letter case.
+The supported bare families are `Opus`, `Sonnet`, `Haiku`, and `Fable`, plus Pi's `Astra` and `Sol`, in any letter case.
+Pi resolves families within the selected provider's installed catalog, preferring an exact ID before family matching.
+Pi worker profiles accept `max-supported` to select the highest supported effort for the chosen model; an explicitly requested unsupported effort still fails rather than silently falling back.
+Core role settings and Claude workers still require a supported explicit effort.
 No special `latest` setting or version table needs updating in this repository.
 Existing exact defaults and private pins are not migrated automatically.
 
@@ -223,6 +229,24 @@ Deleted policies and incomplete drafts do not permanently close configuration or
 See [project routing](project-routing.md) for classifications, difficulty mapping, comparison teams, legacy rules/default, revision checks, and conversational approvals.
 Plain version: both interfaces share the same workers, but nothing runs until you configure who may do each task.
 
+## Execution and image generation
+
+`execution.mode` is `restricted` (the default) or `trusted`.
+Restricted mode retains the coordinator's native-tool restrictions and file-only workers unless optional owned tools are enabled.
+Trusted mode enables native foreground tools and the owned worker `run_command` tool for build and test commands; these commands are not OS-sandboxed.
+`execution.base_ref` selects a Git branch to resolve and freeze for worker checkout preparation, not a directory.
+It does not automatically merge or push candidate changes.
+Plain version: trusted tools can run commands, and the branch setting chooses the code workers start from.
+
+`commands.enabled` can separately enable the owned command tool without enabling trusted native foreground tools.
+Command settings include sandboxing, network access, and timeouts; trusted execution overrides command sandboxing.
+
+Project `images.enabled` defaults to false.
+Explicit image generation uses the separately billed OpenAI Images API with `OPENAI_API_KEY`, not subscription OAuth credentials.
+Supported outputs are PNG and JPEG, written through the owned image tool into its authorized workspace.
+Do not infer live image access or paid verification from offline helper tests.
+Plain version: enable images separately, provide an API key, and expect a separate API charge.
+
 ## Monitor intake
 
 `monitoring.review_every_prompt = true` requests review for every prompt.
@@ -231,4 +255,6 @@ Normalization ignores case, surrounding/repeated whitespace, and trailing questi
 Combined instructions and unknown messages are reviewed.
 All prompts remain saved regardless of this classification; quiet prompts remain available in later review evidence.
 Prompts saved before project selection are mirrored into that project when the instance binds, with duplicate mirroring prevented by prompt identity.
-Plain version: a simple status question does not need another model call, but changing the work does.
+The monitor waits for foreground completion and `monitoring.quiet_seconds`, which defaults to 20.
+Only blocking monitor findings interject; informational and warning findings remain silent but inspectable and acknowledgeable.
+Plain version: a simple status question does not need another model call, and routine feedback does not interrupt the conversation.
