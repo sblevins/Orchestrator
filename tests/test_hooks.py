@@ -18,7 +18,9 @@ class HookTests(unittest.TestCase):
         self.store = Store(self.home)
         self.store.add_project("project", str(self.home))
         self.store.open_session("frontend", "claude", "project")
-        self.environment = patch.dict(os.environ, {"ORCHESTRATOR_CHILD": "0"})
+        self.environment = patch.dict(
+            os.environ, {"ORCHESTRATOR_CHILD": "0", "NO_MISTAKES_GATE": ""}
+        )
         self.environment.start()
         self.addCleanup(self.environment.stop)
 

@@ -12,7 +12,7 @@ import { isAnthropicFamily, resolveForegroundModel } from "../lib/model-families
 export default function (pi: ExtensionAPI) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const binary = resolve(root, "bin/orchestrator");
-  const child = process.env.ORCHESTRATOR_CHILD === "1";
+  const child = process.env.ORCHESTRATOR_CHILD === "1" || Boolean(process.env.NO_MISTAKES_GATE);
   const readTools: Record<string, string[]> = { Read: ["read"], Glob: ["find", "ls"], Grep: ["grep"] };
   let allowedTools = new Set<string>();
   let startupNativeTools: string[] | undefined;

@@ -205,7 +205,9 @@ raise SystemExit(main())
 class NativePiTests(unittest.TestCase):
     def clean_environment(self, directory):
         environment = {
-            key: value for key, value in os.environ.items() if not key.startswith("ORCHESTRATOR_")
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("ORCHESTRATOR_") and key != "NO_MISTAKES_GATE"
         }
         # Isolate personal plugins and credentials, not project extension discovery.
         environment["PI_CODING_AGENT_DIR"] = str(directory / "agent")

@@ -131,6 +131,7 @@ class FrontendIntegrationTests(unittest.TestCase):
                     ORCHESTRATOR_SESSION_ID=session,
                     CLAUDE_PROJECT_DIR=str(home),
                 )
+                environment.pop("NO_MISTAKES_GATE", None)
                 environment.pop("ORCHESTRATOR_CHILD", None)
                 completed = subprocess.run(
                     command,
@@ -175,6 +176,7 @@ class FrontendIntegrationTests(unittest.TestCase):
             environment = dict(
                 os.environ, ORCHESTRATOR_HOME=temporary, ORCHESTRATOR_SESSION_ID=str(uuid.uuid4())
             )
+            environment.pop("NO_MISTAKES_GATE", None)
             environment.pop("ORCHESTRATOR_CHILD", None)
             completed = subprocess.run(
                 [

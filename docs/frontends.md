@@ -103,3 +103,11 @@ Resume uses the recorded native ID without changing the project binding.
 Claude may preserve its initial system-prompt snapshot on resume; start a new instance to apply changed role instructions reliably.
 For project-specific orchestrator model/preferences, select `--project ID` at launch.
 Binding a project later does not hot-swap an already running frontend model.
+
+## External validation workers
+
+A process marked `NO_MISTAKES_GATE`, like a supervisor child marked `ORCHESTRATOR_CHILD=1`, is not an interactive coordinator.
+Claude lifecycle hooks and long-running Stop watches return immediately, and the Pi extension does not change its native tools, model, or lifecycle.
+The marker selects integration behavior only: it creates no Orchestrator session, project binding, approval, or worker grant.
+Explicitly launching `orchestrator start` starts a normal coordinator instead.
+Plain version: a code-review or test agent can work on this repository without being forced to set up a project or wait for coordinator notifications.

@@ -26,7 +26,7 @@ class ClaudeWatcherFrontendTests(unittest.TestCase):
         self.store = Store(self.home)
         self.store.add_project("project", str(self.home))
         self.store.open_session("frontend", "claude", "project")
-        environment = patch.dict(os.environ, {}, clear=False)
+        environment = patch.dict(os.environ, {"NO_MISTAKES_GATE": ""}, clear=False)
         environment.start()
         self.addCleanup(environment.stop)
         for name in ("ORCHESTRATOR_CHILD", "ORCHESTRATOR_SESSION_ID"):

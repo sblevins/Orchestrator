@@ -2,12 +2,12 @@
 
 import contextlib
 import json
-import os
 import shlex
 from pathlib import Path
 
 from .bootstrap import bootstrap, claude_parent, resolve_claude_session, verify_claude_owner
 from .config import load_config
+from .execution_context import externally_managed
 from .monitoring import begin_turn, delivery_updates, finish_turn
 from .store import StateError, Store
 
@@ -109,7 +109,7 @@ def _record_reply(store, session_id, message):
 
 def handle_hook(home: Path, event: str, value: dict) -> dict:
     """Return documented Claude hook JSON; never dispatch or cancel a worker."""
-    if os.environ.get("ORCHESTRATOR_CHILD") == "1":
+    if externally_managed():
         return {}
     native_session_id = value.get("session_id")
     if not isinstance(native_session_id, str) or not native_session_id:

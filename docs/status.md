@@ -48,11 +48,13 @@ Plain version: model names follow the available catalog, and making an image is 
 
 ## Validation
 
-The integrated checkout passes 503 offline tests with Python resource warnings treated as errors.
+The integrated checkout passes 505 offline tests with Python resource warnings treated as errors.
 Ruff lint and formatting, Node syntax checks, and `git diff --check` pass.
 Tests exercise real signed Git workspaces, dirty and unborn source snapshots, submodules, command execution and parent-death cleanup, peer messaging, quiet monitor delivery, standing authorization, critic-only retry, and the installed Pi SDK against a loopback fake provider.
 Image tests use a mocked transport and real binary artifact publication, with no paid image requests.
 Independent review identified and prompted fixes for stalled completion callbacks, observer turn rejection, and synthetic team issues that prevented unattended acceptance.
+A separate external-validation regression reproduces and fixes hooks blocking reviewer shell tools and structured output; it also verifies the long Stop watcher remains inert.
+The suite also passes with an inherited validation-worker marker.
 No paid application-provider requests were made.
 Offline fake-provider tests cannot prove paid model access, answer quality, image billing, live Claude rendering, voice behavior, or idle wakeup.
 Plain version: the automated local checks pass; real paid-model and interactive frontend checks remain separate.
@@ -75,5 +77,5 @@ Plain version: existing sessions still need an upgrade before they can use the n
 
 ## Next step
 
-Run the independent delivery gate and activate the validated version together with refreshed frontend tools.
+The initial delivery review was blocked by the hook bug and timed out; rerun the independent delivery gate with that fix before activation.
 Obtain separate authorization before paid provider acceptance checks.

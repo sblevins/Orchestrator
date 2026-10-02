@@ -21,7 +21,7 @@ class SetupTransportTests(unittest.TestCase):
             (project / "source.txt").write_text("unchanged source")
             store = Store(home)
             store.open_session("frontend", "claude")
-            environment = {**os.environ, "PYTHONPATH": str(ROOT)}
+            environment = {**os.environ, "PYTHONPATH": str(ROOT), "NO_MISTAKES_GATE": ""}
             for key in ("ORCHESTRATOR_CHILD", "ORCHESTRATOR_HOME", "ORCHESTRATOR_SESSION_ID"):
                 environment.pop(key, None)
             # Exercise real transports/state/files. Starting unrelated paid monitor models

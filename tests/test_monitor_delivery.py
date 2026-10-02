@@ -18,6 +18,9 @@ from orchestrator.store import StateError, Store
 
 class MonitorDeliveryTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ, {"NO_MISTAKES_GATE": ""})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.home = Path(self.temporary.name)
@@ -408,7 +411,7 @@ class PiMonitorDeliveryTests(unittest.TestCase):
             environment = {
                 key: value
                 for key, value in os.environ.items()
-                if not key.startswith("ORCHESTRATOR_")
+                if not key.startswith("ORCHESTRATOR_") and key != "NO_MISTAKES_GATE"
             }
             result = subprocess.run(
                 [

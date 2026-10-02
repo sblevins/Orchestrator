@@ -40,8 +40,8 @@ class CurrentPolicyDocumentationTests(unittest.TestCase):
     def test_status_separates_validation_from_deployment(self):
         status = (ROOT / "docs/status.md").read_text()
         self.assertIn("## Deployment activation", status)
-        self.assertIn("validation is pending", status.lower())
-        self.assertIn("No paid provider calls", status)
+        self.assertIn("offline tests", status.lower())
+        self.assertIn("No paid application-provider requests", status)
         self.assertNotIn("PID `", status)
         self.assertNotIn("/home/", status)
         self.assertNotIn("~/Agents/", status)

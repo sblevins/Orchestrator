@@ -30,6 +30,7 @@ class LifecycleE2ETests(unittest.TestCase):
         self.store.open_session(self.session_id, "claude", "example")
         self.environment = {
             **os.environ,
+            "NO_MISTAKES_GATE": "",
             "ORCHESTRATOR_HOME": str(self.home),
             "ORCHESTRATOR_SESSION_ID": self.session_id,
             "PYTHONPATH": str(ROOT),

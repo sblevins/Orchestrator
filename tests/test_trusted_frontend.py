@@ -231,7 +231,7 @@ class TrustedPiTests(unittest.TestCase):
             environment = {
                 key: value
                 for key, value in os.environ.items()
-                if not key.startswith("ORCHESTRATOR_")
+                if not key.startswith("ORCHESTRATOR_") and key != "NO_MISTAKES_GATE"
             }
             result = subprocess.run(
                 [
