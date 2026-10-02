@@ -51,8 +51,8 @@ Tracked defaults live in `config/default.toml`.
 Private `config/local.toml` overrides them; `config/projects/PROJECT_ID.toml` adds project preferences, followed by private `config/projects/PROJECT_ID.json`.
 Ask the bound coordinator to read `project_settings` and apply partial changes with `configure_project`, optionally checking `expected_revision`.
 It changes only that project's JSON override, never shared defaults, local/global settings, or another project.
-Roles, effort, personalization, monitoring, validated `planning.templates` graphs, execution, and permissions can be changed conversationally.
-Role/model settings are captured for tasks, so new tasks use updated choices; permissions, concurrency, and worker/routing disable settings remain live at enforcement points.
+Roles, effort, personalization, monitoring, validated `planning.templates` graphs, specialist `context.read_roots`, execution, and permissions can be changed conversationally.
+Role/model settings and specialist read roots are captured for tasks, so new tasks use updated choices; permissions, concurrency, and worker/routing disable settings remain live at enforcement points.
 Native foreground model and effort changes still use `/model` and `/effort`.
 Executable commands remain trusted local configuration, not conversational settings, because they can have effects outside the project.
 If you have no private configuration yet, run `./bin/orchestrator config init`.

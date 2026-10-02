@@ -42,6 +42,8 @@ function brokerClient(options, onFailure) {
   }
   const child = spawn(options.python, ['-I', options.broker, 'serve', JSON.stringify({
     cwd: options.cwd, project_root: options.project_root, mode: options.mode, trusted: options.trusted,
+    read_roots: options.read_roots ?? [], private_paths: options.private_paths ?? [],
+    auth_path: options.auth_path, agent_dir: options.agent_dir,
     images: options.images, image_state_directory: options.image_state_directory,
     commands: options.commands, worker_context: options.worker_context,
     tool_names: options.tool_names ?? options.tools,
@@ -281,11 +283,15 @@ export async function runBridge(options, { modelsPath = null } = {}) {
         }
       },
     }));
+    const readContext = options.read_roots ?? [];
+    const readContextPrompt = readContext.length
+      ? ` Additional read-only context roots (alias/path): ${JSON.stringify(readContext)}. Use absolute paths for these mutable directories; they are not pinned Git snapshots.`
+      : '';
     const resourceLoader = {
       getExtensions: () => ({ extensions: [], errors: [], runtime: sdk.createExtensionRuntime() }),
       getSkills: () => ({ skills: [], diagnostics: [] }), getPrompts: () => ({ prompts: [], diagnostics: [] }),
       getThemes: () => ({ themes: [], diagnostics: [] }), getAgentsFiles: () => ({ agentsFiles: [] }),
-      getSystemPrompt: () => `You are a supervised worker. Follow only the supplied task. Use the declared restricted file tools. Read project files at ${options.project_root || options.cwd}. ${options.mode === 'write' ? `Write only at ${options.cwd}.` : 'Relative tool paths start at the project root.'} ${allowed.includes('run_command') ? 'Commands are available only through run_command with host-configured permissions.' : 'Never execute commands.'} Do not change control files through file tools. Return your result as text.`,
+      getSystemPrompt: () => `You are a supervised worker. Follow only the supplied task. Use the declared restricted file tools. Read project files at ${options.project_root || options.cwd}. ${options.mode === 'write' ? `Write only at ${options.cwd}.` : 'Relative tool paths start at the project root.'}${readContextPrompt} ${allowed.includes('run_command') ? 'Commands are available only through run_command with host-configured permissions.' : 'Never execute commands.'} Do not change control files through file tools. Return your result as text.`,
       getSystemPromptSource: () => undefined, getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [],
       extendResources: () => {}, reload: async () => {},
     };

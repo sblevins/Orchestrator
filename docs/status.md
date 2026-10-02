@@ -15,6 +15,12 @@ Unknown outcomes are not blindly replayed.
 
 Project-local configuration is repeatable through `configure_project` and `setup_project`, including repairs and changes after dispatch.
 It never changes another project's settings or shared defaults.
+Specialists can inspect explicitly configured sibling worktrees through project-local `context.read_roots`, with aliases and canonical absolute paths in their prompts.
+Claude receives additional read directories and Pi enforces the same configured roots in its owned file broker; workers do not inherit them.
+The folder list is captured for new tasks, while existing tasks retain their list and referenced files remain mutable, not frozen Git snapshots.
+Unavailable references fail specialist launches without blocking unrelated settings or ordinary workers; Pi keeps ordinary primary-project source readable while excluding private run, auth and supervisor state/configuration subtrees.
+Claude `--add-dir` cannot exclude subtrees, so that exclusion applies to Pi specialists only.
+Plain version: name the extra folders specialists need without rebinding project history or giving workers more access.
 Routing supports classifications, caller-selected difficulty or effort, and legacy rules/default profiles without automatic worker model defaults.
 The bound coordinator selects both planned and on-demand workers.
 Monitor classification suggestions remain recommendations unless unattended authorization permits selection with configured profile effort or `execution.worker_difficulty`.
@@ -48,10 +54,13 @@ Plain version: model names follow the available catalog, and making an image is 
 
 ## Validation
 
-The integrated checkout passes the full offline test suite with Python resource warnings treated as errors.
+The integrated checkout passes 558 offline tests with Python resource warnings treated as errors.
 Ruff lint and formatting, Node syntax checks, and `git diff --check` pass.
 Tests exercise real signed Git workspaces, dirty and unborn source snapshots, submodules, command execution and parent-death cleanup, peer messaging, quiet monitor delivery, standing authorization, critic-only retry, and the installed Pi SDK against a loopback fake provider.
 Image tests use a mocked transport and real binary artifact publication, with no paid image requests.
+Read-context regression tests use a real temporary linked Git worktree, public project settings, captured tasks, generated Claude arguments, and the installed Pi SDK with a loopback fake provider and owned broker child.
+They verify branch-only reads/search/listing, default denial, project isolation, immutable captured settings, credential and symlink escape denial, and unchanged worker authority.
+Missing-reference and self-hosted-project regressions cover unrelated settings/worker continuity, runtime-supplied private-subtree exclusion for sibling task runs and other projects' private settings, readable tracked `config/default.toml`, references below `secrets`-named or `.claude` folders, and trusted ordinary hidden source files.
 Independent review identified and prompted fixes for stalled completion callbacks, observer turn rejection, and synthetic team issues that prevented unattended acceptance.
 A separate external-validation regression reproduces and fixes hooks blocking reviewer shell tools and structured output; it also verifies the long Stop watcher remains inert.
 The suite also passes with an inherited validation-worker marker.
@@ -72,10 +81,11 @@ Live provider entitlement, exact effort support, frontend behavior, and workload
 
 The existing running deployment has not been activated on this checkout's new behavior.
 After validation, upgrade and restart the supervisor and native frontend together for the schema and tool changes.
-No live process was restarted as part of this documentation update.
+No live process was restarted for the specialist read-context changes; current captured tasks remain unchanged.
 Plain version: existing sessions still need an upgrade before they can use the new features.
 
 ## Next step
 
-The initial delivery review was blocked by the hook bug and timed out; rerun the independent delivery gate with that fix before activation.
+Complete independent delivery checks for specialist read context before activation.
+The earlier hook-related validation failure was fixed before baseline PR #1 merged; it is not an outstanding blocker.
 Obtain separate authorization before paid provider acceptance checks.

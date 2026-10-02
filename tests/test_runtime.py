@@ -37,9 +37,11 @@ class RuntimeTests(unittest.TestCase):
         shutil.copytree(ROOT / "roles", self.install / "roles")
         (self.install / "orchestrator/adapters.py").write_text("""
 import json, sys
+from pathlib import Path
 def build_command(config, role, prompt, cwd, output_path, session_id=None, *,
-                  project_root=None, stdin_prompt=False):
+                  project_root=None, read_roots=None, private_paths=(), stdin_prompt=False):
     assert project_root is not None and stdin_prompt
+    assert any(Path(cwd).is_relative_to(path) for path in private_paths)
     return [sys.executable, config['adapters']['claude']['command'][0]]
 def parse_result(adapter, stdout, returncode):
     if returncode: raise ValueError('harness failed')

@@ -48,7 +48,15 @@ Core specialists have read-only tools; authorized write workers add file editing
 Trusted workers, and restricted workers with `commands.enabled = true`, additionally have owned `run_command` for command and test execution.
 Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
 No permission bypass is added.
-Claude receives the canonical project root through `--add-dir`; Pi uses owned path-limited file tools without inherited orchestration integrations.
+Claude receives the canonical project root and captured specialist `context.read_roots` through repeated `--add-dir` arguments; Pi uses the same explicit extra roots through owned path-limited file tools without inherited orchestration integrations.
+Specialist prompts list aliases and absolute directories as mutable read context, not pinned Git snapshots.
+Configuration is captured in each task: later edits apply to new tasks, while attached critics and revision planners normally inherit their planning chain's captured settings.
+An eligible explicit `retry_review` uses current configuration while preserving the saved draft.
+Worker builders do not inherit specialist roots; `execution.base_ref` remains a worker checkout choice.
+Missing or retargeted reference directories fail the affected specialist launch, while configuration inspection, unrelated settings edits, and ordinary workers remain usable.
+Pi excludes private run/auth subtrees and the supervisor's private state and configuration during reads and traversal rather than rejecting the entire registered checkout containing them.
+Tracked source such as `config/default.toml` stays readable; Claude `--add-dir` cannot exclude subtrees, so this protection applies to Pi specialists only.
+Plain version: new specialist work can read the folders you named, but old tasks keep their saved folder list and workers keep their existing access.
 A private working directory and read-only tools are not a hostile-process isolation boundary.
 
 Child environments retain normal authentication but remove `ORCHESTRATOR_SESSION_ID`, `ORCHESTRATOR_FRONTEND`, and `CLAUDECODE` nesting context, and set `ORCHESTRATOR_CHILD=1`.

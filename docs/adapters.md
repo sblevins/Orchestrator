@@ -10,6 +10,7 @@ Plain version: the configured model determines which approved program runs the t
 
 Specialists receive `-p --output-format json`, explicit `--model` and `--effort`, `--permission-mode dontAsk`, and matching `--tools` and `--allowedTools` lists.
 The specialist allowlist is a validated subset of `Read,Glob,Grep`; an empty list disables tools rather than restoring defaults.
+The registered project root and explicitly captured `context.read_roots` receive repeated `--add-dir` arguments, without adding editing or command tools.
 Workers additionally receive `--restricted`, with `Read,Glob,Grep` for reading and `Edit,Write` added only in write mode.
 Restricted workers receive file tools by default; `commands.enabled` adds owned `run_command`, which uses the OS sandbox unless `commands.sandbox = false`.
 Trusted workers receive owned `run_command` automatically, always without an OS sandbox.
@@ -61,6 +62,18 @@ Trusted workers can also read and edit ordinary project configuration such as `.
 Credential files, orchestration control state, Git metadata, paths outside authorized roots, and multiply linked or special files remain excluded from these file tools.
 An individual file access error is recoverable: the model can correct its path and continue without restarting the task.
 Writes are confined to a separate worker checkout; the source project is readable but not writable through these tools.
+Specialist `context.read_roots` pass explicitly through the adapter, SDK bridge and broker, where every extra directory is pinned with no-follow directory descriptors.
+Specialist relative paths still target the registered project root; additional roots use absolute paths and appear with aliases in the prompt.
+Read, list, find and grep work inside these additional roots; credential exclusions and resolved-path containment still apply.
+Workers never inherit specialist roots, and the broker rejects extra roots in write mode or with worker context, even if supplied outside normal builders.
+Extra roots cannot overlap private run/auth paths or private supervisor state, and the Pi installation remains outside all model-readable roots.
+Folder names above a selected root, such as `secrets`, `tokens` or `.claude`, do not block it; credential files and Git metadata inside it stay hidden.
+The runtime passes the supervisor's private paths to the specialist broker: `data/`, `config/local.toml`, `config/projects/`, `config/workflows/` and `config/crew-dispatch.json` under the Orchestrator home.
+A registered primary project containing those paths, such as a self-hosted Orchestrator checkout, remains usable: Pi denies those specific files/subtrees and omits them from listings and recursive searches, while tracked source such as `config/default.toml` stays readable.
+Claude `--add-dir` grants whole directories and cannot hide subtrees, so a Claude specialist for a self-hosted checkout can read that checkout's private state.
+The broker limits only Pi model file tools, not unsandboxed commands, other processes, or native Claude tools.
+Plain version: when Orchestrator works on its own folder, Pi specialists can read its normal code and default settings, but not other tasks' files or private settings; Claude specialists cannot be limited this way.
+Plain version: naming a reference folder lets specialists inspect it, not edit it or give workers access.
 `grep` uses literal text, not regular expressions.
 Command-enabled restricted workers use the OS sandbox unless `commands.sandbox = false`; trusted workers can build and test with host access.
 Trusted commands receive host toolchain paths and the user home for installed tools and Git identity, but API-key environment variables are not copied into commands.

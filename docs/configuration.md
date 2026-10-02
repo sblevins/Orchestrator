@@ -37,9 +37,9 @@ A `null` value removes only this project's own override for that setting, restor
 Unknown setting names are rejected with spelling guidance; shared-only `supervisor.max_parallel` and `supervisor.poll_seconds` are rejected in favor of `execution.max_parallel` and `config/local.toml`.
 If a project's effective settings become invalid, only that project's background work pauses and a notification explains the error.
 Its coordinator can still receive prompts and use the Orchestrator tools to inspect `project_settings` and repair it with `configure_project`, while other tools stay blocked until the repair.
-Settings include roles and effort, personalization, monitoring, planning and named templates, execution, and permissions.
+Settings include roles and effort, personalization, monitoring, planning and named templates, specialist read context, execution, and permissions.
 Arbitrary adapter/frontend executable changes are rejected conversationally because a replacement executable can affect things outside the project and ignore safety flags.
-Existing tasks keep captured role and model settings.
+Existing tasks keep captured role, model, and specialist read-context settings.
 Project permissions, worker enablement, and worker concurrency are live controls.
 Native foreground model and effort changes still use `/model` and `/effort`.
 Plain version: ask for a change here, and only this project's future work uses it.
@@ -73,6 +73,32 @@ Project ownership, dependency correctness, no blind retry of unknown outcomes, i
 Restricted workers have file tools by default; `commands.enabled = true` adds `run_command`, which is OS-sandboxed unless `commands.sandbox = false`.
 Trusted worker commands are always unsandboxed.
 Plain version: project permission settings do not allow skipping required work, and trusted commands need care because they can act outside the project.
+
+## Specialist read context
+
+Use bound `configure_project` to give planner, critic, and monitor access to explicitly selected reference directories, including sibling Git worktrees or another project chosen as reference.
+The default is `context.read_roots = []`; no sibling or parent directory is discovered or authorized automatically.
+For example:
+
+```json
+{"settings":{"context":{"read_roots":[{"alias":"design","path":"/absolute/path/to/design-worktree"}]}}}
+```
+
+Each entry has exactly `alias` and `path`; at most 16 entries are allowed.
+Aliases are unique, 1-64 ASCII letters, digits, underscores or hyphens, starting with a letter or digit; `project` is reserved.
+Directories must exist when explicitly saving `context.read_roots` and when launching a specialist; conversational input may use `~` or a directory alias, which is resolved to an absolute canonical path before saving.
+Stored configuration requires canonical absolute path strings; duplicate directories, host-wide roots, the home directory, paths overlapping explicit authentication or private supervisor state/configuration, and paths inside Git, `.orchestrator` or host credential-store directories (`.ssh`, `.aws`, `.azure`, `.gnupg`, `.docker`, `.kube`) are rejected.
+Other folder names such as `secrets`, `tokens` or `.claude` do not block a reference; the Pi broker still hides credential files and Git metadata inside it.
+Launch rechecks availability and refuses a captured path that now resolves elsewhere, rather than following a retargeted symlink.
+Choose the specific reference directory, not a parent containing unrelated projects.
+Prompts list the captured aliases and absolute paths; use absolute tool paths for references, and resolve project-relative references against the registered project root.
+These directories are mutable read context, not pinned Git snapshots; uncommitted design files can be inspected without changing project identity or history.
+Neither write authority nor worker workspace roots change, and `execution.base_ref` remains solely a worker checkout setting.
+Existing queued/running tasks and their normal planning-review chains keep their captured settings; an eligible explicit `retry_review` captures current settings without rerunning its saved planner.
+The directory contents themselves are not frozen when settings are captured.
+A missing or moved root fails only the affected specialist launch with a repair/remove message, not ordinary worker builders, settings inspection, or unrelated settings changes.
+Repair or remove it with `configure_project`; `[]` disables additional roots and `null` removes the project override.
+Plain version: name the extra folders specialists may read, and new work can inspect them without changing or editing either project.
 
 ## Supervisor and personalization
 

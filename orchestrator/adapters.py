@@ -1,4 +1,4 @@
-"""Pure argv builders and terminal-result decoders for supervised harnesses."""
+"""Validated argv builders and terminal-result decoders for supervised harnesses."""
 
 import json
 import math
@@ -8,6 +8,7 @@ from pathlib import Path
 
 from orchestrator.config import ConfigurationError, role_config, validate_executor
 from orchestrator.models import normalize_model
+from orchestrator.read_context import validate_read_roots
 
 
 class AdapterError(ValueError):
@@ -33,13 +34,17 @@ def build_command(
     session_id: str | None = None,
     *,
     project_root: Path | None = None,
+    read_roots: list[dict] | None = None,
+    private_paths: tuple[Path, ...] = (),
     stdin_prompt: bool = False,
 ) -> list[str]:
     """Build a read-only invocation; session_id resumes an existing conversation.
 
     Runtime supplies cwd, a sanitized environment, prompt-file stdin, and deadlines.
     Other callers retain positional prompts unless stdin_prompt is enabled.
-    No files are read/written here, including the optional harness output artifact.
+    Explicit read roots are checked against the filesystem; no file contents are read
+    or written here, including the optional harness output artifact.
+    Private supervisor paths are hidden by the Pi broker; Claude cannot hide subtrees.
     """
     try:
         settings = role_config(config, role)
@@ -52,6 +57,14 @@ def build_command(
         _argument(session_id, "session_id")
         if session_id.startswith("-"):
             raise AdapterError("session_id must not start with a dash")
+    try:
+        read_roots = validate_read_roots(
+            read_roots if read_roots is not None else [],
+            require_available=True,
+            excluded_paths=(cwd, *private_paths),
+        )
+    except ValueError as error:
+        raise AdapterError(str(error)) from error
     adapter = settings["adapter"]
     command = list(config["adapters"][adapter]["command"])
     if adapter == "claude":
@@ -79,6 +92,8 @@ def build_command(
         ]
         if project_root is not None:
             command += ["--add-dir", _argument(str(project_root), "project_root")]
+        for root in read_roots:
+            command += ["--add-dir", root["path"]]
         if session_id is not None:
             command += ["--resume", session_id]
         if stdin_prompt:
@@ -93,6 +108,8 @@ def build_command(
             cwd,
             output_path,
             project_root=project_root,
+            read_roots=read_roots,
+            private_paths=private_paths,
             stdin_prompt=stdin_prompt,
         )
     else:
@@ -109,6 +126,8 @@ def build_pi_command(
     output_path,
     *,
     project_root=None,
+    read_roots=None,
+    private_paths=(),
     stdin_prompt=True,
     mode="read",
     worker_context=None,
@@ -128,6 +147,18 @@ def build_pi_command(
     _argument(str(output_path), "output_path")
     if mode not in ("read", "write") or type(stdin_prompt) is not bool:
         raise AdapterError("invalid Pi invocation mode")
+    try:
+        read_roots = validate_read_roots(
+            read_roots if read_roots is not None else [],
+            require_available=True,
+            excluded_paths=(cwd, *private_paths),
+        )
+    except ValueError as error:
+        raise AdapterError(str(error)) from error
+    if (read_roots or private_paths) and (mode != "read" or worker_context is not None):
+        raise AdapterError(
+            "Additional read roots and private paths are only available to read-only specialists"
+        )
     command = config.get("adapters", {}).get("pi", {}).get("command")
     if not isinstance(command, list) or len(command) != 1:
         raise AdapterError("Pi command must contain only one executable")
@@ -165,6 +196,8 @@ def build_pi_command(
         "tools": selected,
         "cwd": _argument(str(cwd), "cwd"),
         "project_root": _argument(str(project_root), "project_root") if project_root else None,
+        "read_roots": read_roots,
+        "private_paths": [_argument(str(path), "private_path") for path in private_paths],
     }
     if mode == "write" and config.get("images", {}).get("enabled", False):
         selected.append("generate_image")
