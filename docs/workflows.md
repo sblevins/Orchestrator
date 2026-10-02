@@ -83,7 +83,6 @@ Plain version: the page shows which steps belong to the same repeated cycle, but
 Legacy plans without these optional fields remain valid and show unknown estimates without cycle groups.
 The exported snapshot includes derived `waves` and `cycles` lists as well as the saved node metadata.
 
-
 ## Select and customize a template
 
 Use `configure_project` to save complete project-local graphs in `planning.templates` and select a name with `planning.workflow`.
