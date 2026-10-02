@@ -63,7 +63,7 @@ These are presentation metadata, not scheduling deadlines or executable early-st
 ## Validation
 
 The full offline suite passes with Python resource warnings treated as errors and an inherited validation-worker marker.
-This includes the optional real Mermaid parser and Chromium checks using temporary development tools, with no skipped tests in that run.
+The optional real Mermaid parser and Chromium checks also pass when run with temporary development tools, and skip when those tools are absent.
 Those temporary tools are test-only; exporting and viewing the HTML page needs no installed browser automation or Mermaid runtime.
 Artifact tests cover private publication, project isolation, real CLI/MCP calls, saved profiles and team rounds, exclusion of worker prompts, unavailable readiness under invalid settings, injection attempts, 256-node graphs, offline rendering, theme and zoom controls, and no-JavaScript viewing.
 Tests exercise real signed Git workspaces, dirty and unborn source snapshots, submodules, command execution and parent-death cleanup, peer messaging, quiet monitor delivery, standing authorization, critic-only retry, and the installed Pi SDK against a loopback fake provider.
