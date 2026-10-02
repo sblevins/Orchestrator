@@ -13,6 +13,29 @@ from html import escape
 from importlib.resources import files
 from typing import Any
 
+from orchestrator.plan_presentation import presentation_metadata
+
+ESTIMATE_NOTICE = (
+    "Ideal parallel estimates assume all tasks in a wave start together. "
+    "They exclude waits and limited capacity, and are not promised finish times. "
+    "Unknown means at least one task has no estimate."
+)
+CYCLE_NOTICE = (
+    "These are explicit saved steps, not executable loops or automatic early-stop rules. "
+    "All saved steps remain scheduled unless the coordinator changes or stops work."
+)
+
+
+def _estimate(estimate: dict | None) -> str:
+    if estimate is None:
+        return "Unknown"
+    return f"{estimate['min_minutes']}-{estimate['max_minutes']} min"
+
+
+def _round(node: dict) -> str:
+    cycle = node.get("cycle")
+    return f"Round {cycle['iteration']} / {cycle['max_iterations']}" if cycle else ""
+
 
 def _text(value: Any) -> str:
     """Replace non-display controls, retaining ordinary whitespace and Unicode."""
@@ -62,11 +85,24 @@ def _assignment(node: dict) -> str:
     return "Approval / no worker required" if node.get("kind") == "approval" else "Unassigned"
 
 
+def _mermaid_label(label: str) -> str:
+    # Keep snapshot strings on one line and outside Mermaid's markup syntax.
+    return (
+        " ".join(_text(label).split())
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "\uff02")
+        .replace("#", "\uff03")
+        .replace("`", "\uff40")
+    )
+
+
 def mermaid_diagram(snapshot: dict) -> str:
     """Export Mermaid without executable directives or user-controlled syntax."""
     nodes = snapshot["nodes"]
     identifiers = {node["id"]: f"n{index}" for index, node in enumerate(nodes)}
-    waves = sorted({node["wave"] for node in nodes})
+    metadata = presentation_metadata(nodes)
     # Disable HTML labels even if the consuming viewer enables them globally.
     # This fixed, framework-owned frontmatter contains no snapshot content.
     lines = [
@@ -79,8 +115,14 @@ def mermaid_diagram(snapshot: dict) -> str:
         "---",
         "flowchart LR",
     ]
-    for wave in waves:
-        lines.append(f'  subgraph wave{wave}["Wave {wave}"]')
+    if nodes:
+        lines.append(f'  estimateNotice["{_mermaid_label(ESTIMATE_NOTICE)}"]')
+    if metadata["cycles"]:
+        lines.append(f'  cycleNotice["{_mermaid_label(CYCLE_NOTICE)}"]')
+    for wave_summary in metadata["waves"]:
+        wave = wave_summary["wave"]
+        duration = _estimate(wave_summary["estimate"])
+        lines.append(f'  subgraph wave{wave}["Wave {wave} | ideal parallel: {duration}"]')
         for node in nodes:
             if node["wave"] != wave:
                 continue
@@ -89,25 +131,32 @@ def mermaid_diagram(snapshot: dict) -> str:
                     _compact(node["title"]),
                     _compact(node["state"], 24),
                     _compact(_assignment(node), 90),
+                    f"Estimate: {_estimate(node.get('estimate'))}",
+                    *([_round(node)] if node.get("cycle") else []),
                 )
             )
             # HTML-free Mermaid SVG labels decode only &amp;, &lt; and &gt;, so
             # any other entity shows as literal text. Show the label delimiter,
             # Mermaid's own '#name;' entity marker and the markdown-string
             # backtick as their full-width forms so they display as characters.
-            encoded = (
-                label.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace('"', "\uff02")
-                .replace("#", "\uff03")
-                .replace("`", "\uff40")
-            )
+            encoded = _mermaid_label(label)
             lines.append(f'    {identifiers[node["id"]]}["{encoded}"]')
         lines.append("  end")
     for node in nodes:
         for dependency in node["depends_on"]:
             lines.append(f"  {identifiers[dependency]} --> {identifiers[node['id']]}")
+    for index, cycle in enumerate(metadata["cycles"]):
+        summary = (
+            f"{_compact(cycle['label'], 90)} | Unrolled review/revise · "
+            f"maximum {cycle['max_iterations']} planned rounds | "
+            + "; ".join(
+                f"{identifiers[node['id']]}: {_round(node)} (Wave {node['wave']})"
+                for node in nodes
+                if node["id"] in cycle["node_ids"]
+            )
+        )
+        # Isolated summary notes do not add executable dependency edges.
+        lines.append(f'  cycle{index}["{_mermaid_label(summary)}"]')
     return "\n".join(lines) + "\n"
 
 
@@ -196,8 +245,9 @@ def _worker(worker: dict, title: str) -> str:
     return "".join(sections)
 
 
-def _diagram(nodes: list[dict], identifiers: dict[str, str]) -> str:
-    waves = sorted({node["wave"] for node in nodes})
+def _diagram(nodes: list[dict], identifiers: dict[str, str], metadata: dict) -> str:
+    waves = [wave["wave"] for wave in metadata["waves"]]
+    wave_estimates = {wave["wave"]: _estimate(wave["estimate"]) for wave in metadata["waves"]}
     if not nodes:
         return '<p class="muted">No tasks recorded.</p>'
     positions = {}
@@ -211,13 +261,13 @@ def _diagram(nodes: list[dict], identifiers: dict[str, str]) -> str:
     # Each source that skips a wave gets a lane above the node area. Shared
     # prerequisites share a lane, bounding gutter height by the node count.
     gutter_lanes = {
-        node["id"]: 50 + index * 12
+        node["id"]: 72 + index * 12
         for index, node in enumerate(node for node in nodes if node["id"] in long_edge_sources)
     }
-    node_top = 60 + len(gutter_lanes) * 12
+    node_top = 90 + len(gutter_lanes) * 12
     largest_wave = max(sum(node["wave"] == wave for node in nodes) for wave in waves)
     width = max(360, len(waves) * 360)
-    height = node_top + 10 + largest_wave * 140
+    height = node_top + 10 + largest_wave * 190
     parts = [
         (
             f'<svg id="plan-graph" xmlns="http://www.w3.org/2000/svg" width="{width}" '
@@ -235,10 +285,12 @@ def _diagram(nodes: list[dict], identifiers: dict[str, str]) -> str:
         parts.append(
             f'<g class="wave" data-wave="{wave}"><title>Wave {wave}</title>'
             f'<text x="{column * 360 + 20}" y="30" class="wave-label">'
-            f"Wave {wave}</text></g>"
+            f"Wave {wave}</text>"
+            f'<text x="{column * 360 + 20}" y="52" class="node-meta">'
+            f"ideal parallel: {_html(_compact(wave_estimates[wave], 39))}</text></g>"
         )
         for row, node in enumerate(node for node in nodes if node["wave"] == wave):
-            positions[node["id"]] = (column * 360 + 20, row * 140 + node_top)
+            positions[node["id"]] = (column * 360 + 20, row * 190 + node_top)
     for node in nodes:
         end_x, end_y = positions[node["id"]]
         for dependency in node["depends_on"]:
@@ -270,12 +322,16 @@ def _diagram(nodes: list[dict], identifiers: dict[str, str]) -> str:
     for node in nodes:
         x, y = positions[node["id"]]
         identifier = identifiers[node["id"]]
-        label = f"{node['title']}; {node['state']}; {_assignment(node)}"
+        label = (
+            f"{node['title']}; {node['state']}; {_assignment(node)}; "
+            f"Estimate: {_estimate(node.get('estimate'))}"
+            + (f"; {_round(node)}" if node.get("cycle") else "")
+        )
         parts.append(
             f'<a class="graph-node" href="#task-{identifier}" '
             f'aria-label="{_html(label)}" data-wave="{node["wave"]}">'
             f"<title>{_html(label)}</title>"
-            f'<rect x="{x}" y="{y}" width="300" height="100" rx="10"/>'
+            f'<rect x="{x}" y="{y}" width="300" height="150" rx="10"/>'
         )
         for offset, text, css_class in (
             (26, _compact(node["title"], 31), "node-title"),
@@ -285,6 +341,8 @@ def _diagram(nodes: list[dict], identifiers: dict[str, str]) -> str:
                 "node-meta",
             ),
             (77, _compact(_assignment(node), 39), "node-meta"),
+            (103, _compact(f"Estimate: {_estimate(node.get('estimate'))}", 39), "node-meta"),
+            (129, _compact(_round(node), 39), "node-meta"),
         ):
             parts.append(
                 f'<text x="{x + 12}" y="{y + offset}" class="{css_class}">{_html(text)}</text>'
@@ -292,6 +350,26 @@ def _diagram(nodes: list[dict], identifiers: dict[str, str]) -> str:
         parts.append("</a>")
     parts.append("</svg>")
     return "".join(parts)
+
+
+def _task_links(
+    node_ids: list[str],
+    nodes: dict[str, dict],
+    identifiers: dict[str, str],
+    *,
+    rounds: bool = False,
+) -> str:
+    return (
+        "<ul>"
+        + "".join(
+            f'<li><a href="#task-{identifiers[node_id]}">{_html(nodes[node_id]["title"])}</a>'
+            f" · Wave {nodes[node_id]['wave']}"
+            + (f" · {_html(_round(nodes[node_id]))}" if rounds else "")
+            + "</li>"
+            for node_id in node_ids
+        )
+        + "</ul>"
+    )
 
 
 def _hash(content: str) -> str:
@@ -309,6 +387,8 @@ def html_page(snapshot: dict, mermaid: str) -> str:
     )
     nodes = snapshot["nodes"]
     identifiers = {node["id"]: f"n{index}" for index, node in enumerate(nodes)}
+    metadata = presentation_metadata(nodes)
+    cycle_identifiers = {cycle["id"]: f"c{index}" for index, cycle in enumerate(metadata["cycles"])}
     title = f"{snapshot['project_id']} / {snapshot['plan_id']}"
     parallel_limit = snapshot.get("max_parallel")
     if parallel_limit is None:
@@ -364,11 +444,37 @@ def html_page(snapshot: dict, mermaid: str) -> str:
             "Full titles, assignments, and dependency links appear in task details.</p>"
             '<div class="diagram" tabindex="0" role="region" aria-label="Scrollable dependency graph">'
         ),
-        _diagram(nodes, identifiers),
+        _diagram(nodes, identifiers, metadata),
         "</div><details><summary>Mermaid source</summary><pre><code>"
         + _html(mermaid)
-        + '</code></pre></details></section><section id="context"><h2>Plan context</h2>',
+        + "</code></pre></details>",
+        f'<p class="notice">{ESTIMATE_NOTICE}</p><div class="wave-cards">',
     ]
+    nodes_by_id = {node["id"]: node for node in nodes}
+    for wave in metadata["waves"]:
+        sections.append(
+            '<article class="wave-card">'
+            f"<h3>Wave {wave['wave']}</h3>"
+            f"<p>ideal parallel: {_html(_estimate(wave['estimate']))}</p>"
+            f'<p class="muted">{wave["estimated_tasks"]} / {len(wave["node_ids"])} tasks estimated</p>'
+            + _task_links(wave["node_ids"], nodes_by_id, identifiers)
+            + "</article>"
+        )
+    sections.append("</div></section>")
+    if metadata["cycles"]:
+        sections.append(
+            f'<section id="cycles"><h2>Review / revise groups</h2><p>{CYCLE_NOTICE}</p>'
+        )
+        for cycle in metadata["cycles"]:
+            sections.append(
+                f'<article class="cycle-card" id="cycle-{cycle_identifiers[cycle["id"]]}">'
+                f"<h3>{_html(cycle['label'])}</h3>"
+                f"<p>Unrolled review/revise · maximum {cycle['max_iterations']} planned rounds</p>"
+                + _task_links(cycle["node_ids"], nodes_by_id, identifiers, rounds=True)
+                + "</article>"
+            )
+        sections.append("</section>")
+    sections.append('<section id="context"><h2>Plan context</h2>')
     for key, label in (
         ("assumptions", "Assumptions"),
         ("risks", "Risks"),
@@ -391,7 +497,20 @@ def html_page(snapshot: dict, mermaid: str) -> str:
                     ("Readiness", node.get("readiness") or "Not applicable"),
                 )
             )
-            + f'</div><p class="prose">{_html(node["description"])}</p>'
+            + f'<span class="badge">Estimate: {_html(_estimate(node.get("estimate")))}</span>'
+            + (
+                f'<a class="badge" href="#cycle-{cycle_identifiers[node["cycle"]["id"]]}">'
+                f"{_html(_round(node))}</a>"
+                if node.get("cycle")
+                else ""
+            )
+            + "</div>"
+            + (
+                f'<p class="prose">Estimate basis: {_html(node["estimate"]["basis"])}</p>'
+                if node.get("estimate")
+                else '<p class="muted">No task estimate recorded.</p>'
+            )
+            + f'<p class="prose">{_html(node["description"])}</p>'
             "<h3>Acceptance criteria</h3>"
             + _list(node.get("acceptance_criteria", []))
             + "<h3>Dependencies</h3>"

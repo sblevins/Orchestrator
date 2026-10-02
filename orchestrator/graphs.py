@@ -16,6 +16,7 @@ class GraphError(ValueError):
 MAX_NODES = 256
 MAX_TEXT = 8192
 MAX_ITEMS = 64
+MAX_ESTIMATE_MINUTES = 525600
 MAX_WORKFLOW_BYTES = 4 * 1024 * 1024
 WORKFLOW_DIRECTORY = Path(__file__).resolve().parent.parent / "workflows"
 IDENTIFIER_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
@@ -68,6 +69,30 @@ def planning_schema() -> dict:
         "kind": {"type": "string", "enum": ["work", "review", "approval"]},
         "mode": {"type": "string", "enum": ["read", "write"], "default": "read"},
     }
+    required_node_properties = [key for key in node_properties if key != "mode"]
+    node_properties.update(
+        estimate={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["min_minutes", "max_minutes", "basis"],
+            "properties": {
+                "min_minutes": {"type": "integer", "minimum": 1, "maximum": MAX_ESTIMATE_MINUTES},
+                "max_minutes": {"type": "integer", "minimum": 1, "maximum": MAX_ESTIMATE_MINUTES},
+                "basis": text,
+            },
+        },
+        cycle={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["id", "label", "iteration", "max_iterations"],
+            "properties": {
+                "id": identifier,
+                "label": {**text, "maxLength": 256},
+                "iteration": {"type": "integer", "minimum": 1, "maximum": MAX_NODES},
+                "max_iterations": {"type": "integer", "minimum": 1, "maximum": MAX_NODES},
+            },
+        },
+    )
     properties = {
         "summary": text,
         "assumptions": text_list,
@@ -80,7 +105,7 @@ def planning_schema() -> dict:
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": [key for key in node_properties if key != "mode"],
+                "required": required_node_properties,
                 "properties": node_properties,
             },
         },
@@ -156,9 +181,10 @@ def validate_plan(value: dict) -> dict:
             _text(item, field)
     _list(value["nodes"], "nodes", 1, MAX_NODES)
     identifiers = set()
+    cycle_groups = {}
     for node in value["nodes"]:
         _object(
-            {key: item for key, item in node.items() if key != "mode"}
+            {key: item for key, item in node.items() if key not in ("mode", "estimate", "cycle")}
             if type(node) is dict
             else node,
             ("id", "title", "description", "depends_on", "acceptance_criteria", "kind"),
@@ -176,6 +202,33 @@ def validate_plan(value: dict) -> dict:
             raise GraphError("node.mode must be read or write")
         if node.get("mode") == "write" and node["kind"] != "work":
             raise GraphError("Only work nodes can request write mode")
+        if "estimate" in node:
+            estimate = node["estimate"]
+            _object(estimate, ("min_minutes", "max_minutes", "basis"), "node.estimate")
+            for field in ("min_minutes", "max_minutes"):
+                if (
+                    type(estimate[field]) is not int
+                    or not 1 <= estimate[field] <= MAX_ESTIMATE_MINUTES
+                ):
+                    raise GraphError(
+                        f"node.estimate.{field} must be an integer from 1 to {MAX_ESTIMATE_MINUTES}"
+                    )
+            if estimate["min_minutes"] > estimate["max_minutes"]:
+                raise GraphError("node.estimate.min_minutes must not exceed max_minutes")
+            _text(estimate["basis"], "node.estimate.basis")
+        if "cycle" in node:
+            cycle = node["cycle"]
+            _object(cycle, ("id", "label", "iteration", "max_iterations"), "node.cycle")
+            _identifier(cycle["id"], "node.cycle.id")
+            _text(cycle["label"], "node.cycle.label", 256)
+            for field in ("iteration", "max_iterations"):
+                if type(cycle[field]) is not int or not 1 <= cycle[field] <= MAX_NODES:
+                    raise GraphError(f"node.cycle.{field} must be an integer from 1 to {MAX_NODES}")
+            if cycle["iteration"] > cycle["max_iterations"]:
+                raise GraphError("node.cycle.iteration must not exceed max_iterations")
+            group = (cycle["label"], cycle["max_iterations"])
+            if cycle_groups.setdefault(cycle["id"], group) != group:
+                raise GraphError(f"cycle {cycle['id']} must use the same label and max_iterations")
         _list(node["acceptance_criteria"], "node.acceptance_criteria", 1)
         for criterion in node["acceptance_criteria"]:
             _text(criterion, "node.acceptance_criteria")

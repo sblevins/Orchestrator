@@ -63,6 +63,27 @@ Export does not launch a browser; the optional CLI `--open` requests browser ope
 The coordinator may also use available native browser tools to open the generated page when requested.
 The default `graph PLAN_ID` output remains JSON.
 
+### Task estimates and unrolled rounds
+
+Nodes may optionally contain an `estimate` with `min_minutes`, `max_minutes`, and a plain-text `basis` explaining assumptions.
+Both durations are positive whole minutes, at most 525600, and the minimum cannot exceed the maximum.
+The planner supplies evidence-based ranges; the renderer never invents them.
+Missing estimates appear as unknown, including the whole wave if any task in it has no estimate.
+A wave's ideal parallel range is the largest minimum and largest maximum among its tasks, assuming simultaneous starts and enough workers.
+It is not a sum, a finish time, or a promise: queue time, approval waits, and constrained worker capacity are not included.
+Plain version: the wave time assumes its tasks can all start together; waiting or fewer workers makes it take longer.
+
+Explicit repeated review/revise nodes may carry `cycle: {"id":"quality","label":"Review / revise","iteration":1,"max_iterations":3}`.
+The view links grouped tasks across waves and labels each round and the maximum planned round count.
+Multiple tasks can share one round; group labels and maxima must agree, and round numbers must be within the maximum (1 to 256).
+Only explicitly annotated nodes are grouped; neither titles nor team comparison rounds are interpreted as cycle metadata.
+These are already-unrolled DAG steps, not executable loops or conditional retries.
+The scheduler still visits every saved step unless work is separately changed or stopped; a displayed maximum does not add an automatic early exit when findings are gone.
+Plain version: the page shows which steps belong to the same repeated review, but does not decide whether to run another round.
+Legacy plans without these optional fields remain valid and show unknown estimates without cycle groups.
+The exported snapshot includes derived `waves` and `cycles` lists as well as the saved node metadata.
+
+
 ## Select and customize a template
 
 Use `configure_project` to save complete project-local graphs in `planning.templates` and select a name with `planning.workflow`.

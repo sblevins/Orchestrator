@@ -123,7 +123,9 @@ class PlanRenderingTests(unittest.TestCase):
             re.findall(r"n\d+ --> n\d+", diagram),
             ["n0 --> n1", "n0 --> n2", "n1 --> n3", "n2 --> n3"],
         )
-        self.assertRegex(diagram, r'subgraph wave2\["Wave 2"\]\n    n1\[.*\n    n2\[')
+        self.assertRegex(
+            diagram, r'subgraph wave2\["Wave 2 \| ideal parallel: Unknown"\]\n    n1\[.*\n    n2\['
+        )
         artifact = render(source)
         self.assertEqual(
             [
@@ -240,7 +242,8 @@ class PlanRenderingTests(unittest.TestCase):
         for line in diagram.split("---\n", 2)[-1].splitlines():
             self.assertRegex(
                 line,
-                r'^(flowchart LR|  subgraph wave\d+\["Wave \d+"\]|'
+                r'^(flowchart LR|  estimateNotice\["[^"<>`#\n]*"\]|'
+                r'  subgraph wave\d+\["Wave \d+ \| ideal parallel: Unknown"\]|'
                 r'    n\d+\["[^"<>`#\n]*"\]|  end|  n\d+ --> n\d+)$',
             )
         artifact = render(source)
@@ -258,6 +261,54 @@ class PlanRenderingTests(unittest.TestCase):
         self.assertNotIn("\x00", " ".join(artifact.text))
         self.assertNotIn("\x1b", " ".join(artifact.text))
         self.assertEqual(artifact.select("path", **{"class": "edge"})[0]["data-from"], "n0")
+
+    def test_estimates_unknown_waves_and_cross_wave_review_groups(self):
+        source = snapshot()
+        first, second, third, fourth = source["nodes"]
+        first["estimate"] = {"min_minutes": 3, "max_minutes": 8, "basis": ADVERSARIAL}
+        second["estimate"] = {"min_minutes": 7, "max_minutes": 12, "basis": "Review"}
+        third["estimate"] = {"min_minutes": 4, "max_minutes": 20, "basis": "Checks"}
+        for item, iteration in ((first, 1), (second, 2), (fourth, 3)):
+            item["cycle"] = {
+                "id": "review",
+                "label": ADVERSARIAL,
+                "iteration": iteration,
+                "max_iterations": 3,
+            }
+        diagram = mermaid_diagram(source)
+        self.assertIn("Wave 2 | ideal parallel: 7-20 min", diagram)
+        self.assertIn("Wave 3 | ideal parallel: Unknown", diagram)
+        self.assertIn("Estimate: 3-8 min | Round 1 / 3", diagram)
+        self.assertIn("Unrolled review/revise · maximum 3 planned rounds", diagram)
+        self.assertIn("n3: Round 3 / 3 (Wave 3)", diagram)
+        artifact = render(source)
+        text = " ".join(artifact.text)
+        for expected in (
+            "ideal parallel: 7-20 min",
+            "Estimate basis:",
+            "Round 2 / 3",
+            "Unrolled review/revise · maximum 3 planned rounds",
+            "All saved steps remain scheduled unless the coordinator changes or stops work.",
+            "They exclude waits and limited capacity, and are not promised finish times.",
+        ):
+            self.assertIn(expected, text)
+        self.assertEqual(len(artifact.select("article", **{"class": "cycle-card"})), 1)
+        self.assertEqual(len(artifact.select("a", href="#cycle-c0")), 3)
+        self.assertFalse(artifact.select("img"))
+        self.assertEqual(len(artifact.select("script")), 1)
+        self.assertIn("Estimate: 3-8 min", artifact.text)
+        self.assertIn("Round 2 / 3", artifact.text)
+        third.pop("estimate")
+        mixed = render(source)
+        self.assertIn("1 / 2 tasks estimated", " ".join(mixed.text))
+        self.assertIn("Wave 2 | ideal parallel: Unknown", mermaid_diagram(source))
+        self.assertNotIn("0 min", " ".join(mixed.text))
+        # Legacy records do not gain guessed cycles from their titles.
+        legacy = snapshot([node("review round 2 of 3")])
+        legacy_artifact = render(legacy)
+        self.assertFalse(legacy_artifact.select("article", **{"class": "cycle-card"}))
+        self.assertIn("Estimate: Unknown", legacy_artifact.text)
+        self.assertIn("No task estimate recorded.", legacy_artifact.text)
 
     def test_approval_is_not_a_missing_worker_and_capture_does_not_change_mermaid(self):
         source = snapshot([node("permission")])
@@ -478,6 +529,22 @@ if (process.env.PLAN_RENDERING_BROWSER) {
     await page.locator(".graph-node").first().click();
     assert.notEqual(await page.locator("#task-n0").getAttribute("open"), null);
     assert.equal(await page.locator("img").count(), 0);
+    assert.equal(await page.locator(".cycle-card").count(), 1);
+    await page.locator('#task-n0 a[href="#cycle-c0"]').click();
+    assert.equal(await page.evaluate(() => location.hash), "#cycle-c0");
+    await page.evaluate(() => {
+      for (const task of document.querySelectorAll(".graph-node")) {
+        const rectangle = task.querySelector("rect").getBBox();
+        for (const label of task.querySelectorAll("text")) {
+          const bounds = label.getBBox();
+          if (bounds.x < rectangle.x || bounds.y < rectangle.y ||
+              bounds.x + bounds.width > rectangle.x + rectangle.width ||
+              bounds.y + bounds.height > rectangle.y + rectangle.height) {
+            throw new Error("Task label escapes its card: " + label.textContent);
+          }
+        }
+      }
+    });
     await page.setViewportSize({width: 390, height: 844});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 390), true);
     assert.equal(await page.locator(".diagram").evaluate((element) =>
@@ -524,6 +591,9 @@ if (process.env.PLAN_RENDERING_BROWSER) {
     assert.equal(await offlinePage.locator("#theme-button").isVisible(), false);
     assert.equal(await offlinePage.locator("a[download]").count(), 2);
     assert.equal(await offlinePage.locator(".graph-node").count(), 4);
+    assert.equal(await offlinePage.locator(".cycle-card").count(), 1);
+    assert.equal(await offlinePage.locator(".wave-card").count(), 3);
+    assert.equal(await offlinePage.locator('a[href="#cycle-c0"]').count(), 4);
     await noScript.close();
   } finally {
     await browser.close();
@@ -533,6 +603,14 @@ if (process.env.PLAN_RENDERING_BROWSER) {
         source = snapshot()
         source["nodes"][0]["title"] = ADVERSARIAL
         source["summary"] = ADVERSARIAL
+        for index, item in enumerate(source["nodes"]):
+            item["estimate"] = {"min_minutes": 2, "max_minutes": 9, "basis": ADVERSARIAL}
+            item["cycle"] = {
+                "id": "review",
+                "label": ADVERSARIAL * 5,
+                "iteration": min(index + 1, 3),
+                "max_iterations": 3,
+            }
         large = snapshot(
             [node(str(index), [str(index - 1)] if index else [], index + 1) for index in range(256)]
         )

@@ -58,6 +58,8 @@ Distinguish a drafted plan, a reviewed plan, and an approved plan.
 When presenting a saved validated plan, call `export_plan` with `{"plan_id":"<plan-id>"}` through Claude MCP or the Pi `orchestrator` action and link the returned `html_uri`.
 Do not handwrite Mermaid, HTML, or CSS or use shell commands to generate the page; both frontends use the same standardized runtime renderer.
 Export again after material plan, status, or routing changes.
+Ask the planner for evidence-based task estimate ranges and explicit unrolled-round metadata when applicable; the renderer computes wave estimates and groups rounds without inventing missing data or changing execution.
+See `docs/workflows.md#task-estimates-and-unrolled-rounds` for estimate assumptions and cycle semantics.
 The static offline page does not approve or dispatch work, and dependency-depth waves do not promise simultaneous launches.
 Show saved requested profiles and effort, reported family metadata when available, and `Unassigned` until chosen; never infer models from current routing.
 Active project-bound observers may export their own project's plans, but cross-project API reads remain forbidden.

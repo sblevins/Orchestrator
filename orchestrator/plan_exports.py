@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .config import ConfigurationError, load_config
 from .graphs import _topological, ready_nodes, validate_plan
+from .plan_presentation import presentation_metadata
 from .store import StateError, encode, identifier
 from .visibility import _display_text, _rows, _view
 
@@ -100,7 +101,7 @@ def plan_snapshot(store, plan_id: str, *, project_id: str | None = None) -> dict
         paused = database.execute(
             "SELECT 1 FROM service WHERE key=?", ("pause:" + project_id,)
         ).fetchone()
-        return {
+        snapshot = {
             "schema_version": 1,
             "project_id": project_id,
             "plan_id": plan_id,
@@ -124,6 +125,9 @@ def plan_snapshot(store, plan_id: str, *, project_id: str | None = None) -> dict
                 for node in graph["nodes"]
             ],
         }
+
+        snapshot.update(presentation_metadata(snapshot["nodes"]))
+        return snapshot
 
 
 @contextlib.contextmanager

@@ -101,6 +101,43 @@ class PlanExportTests(unittest.TestCase):
                 tuple(values.values()),
             )
 
+    def test_saved_estimates_and_unrolled_groups_survive_cli_export(self):
+        graph = json.loads(json.dumps(self.graph))
+        for index, node in enumerate(graph["nodes"]):
+            node["estimate"] = {
+                "min_minutes": 5 + index,
+                "max_minutes": 10 + index,
+                "basis": "Known synthetic task",
+            }
+        for identifier, iteration in (("inspect", 1), ("left", 1), ("review", 2)):
+            next(node for node in graph["nodes"] if node["id"] == identifier)["cycle"] = {
+                "id": "quality",
+                "label": "Review / revise",
+                "iteration": iteration,
+                "max_iterations": 3,
+            }
+        saved = self.store.create_plan("alpha", "Estimate the work", load_config(self.home))
+        self.store.install_graph(saved["id"], saved["planner_task"], graph)
+        before = self.durable_state()
+        completed = self.cli("plan-view", saved["id"])
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        snapshot = json.loads(Path(result["snapshot_path"]).read_text())
+        self.assertEqual(self.durable_state(), before)
+        self.assertEqual(snapshot["waves"][1]["estimate"], {"min_minutes": 7, "max_minutes": 12})
+        self.assertEqual(snapshot["cycles"][0]["max_iterations"], 3)
+        self.assertEqual(snapshot["cycles"][0]["iterations"], [1, 2])
+        self.assertEqual(
+            {node["id"]: node["estimate"] for node in snapshot["nodes"]},
+            {node["id"]: node["estimate"] for node in graph["nodes"]},
+        )
+        self.assertEqual(
+            next(node for node in snapshot["nodes"] if node["id"] == "review")["cycle"][
+                "iteration"
+            ],
+            2,
+        )
+
     def test_export_preserves_state_and_generates_complete_private_bundle(self):
         before = self.durable_state()
         result = request(self.home, "alpha", "export_plan", {"plan_id": self.plan["id"]})
