@@ -6,9 +6,9 @@ import shlex
 from pathlib import Path
 
 from .bootstrap import bootstrap, claude_parent, resolve_claude_session, verify_claude_owner
-from .config import load_config
+from .config import repairable_config
 from .execution_context import externally_managed
-from .monitoring import begin_turn, delivery_updates, finish_turn
+from .monitoring import begin_turn, delivery_updates, finish_turn, touch_turn
 from .store import StateError, Store
 
 CONTEXT_LIMIT = 9000
@@ -27,9 +27,8 @@ def _pending(store, session_id, *, startup=False):
         updates = store.updates(session_id)
     else:
         session = store.session(session_id)
-        quiet_seconds = load_config(store.home, session["project_id"])["monitoring"].get(
-            "quiet_seconds", 20
-        )
+        config = repairable_config(store.home, session["project_id"]) or {}
+        quiet_seconds = config.get("monitoring", {}).get("quiet_seconds", 20)
         delivery = delivery_updates(store, session_id, quiet_seconds)
         updates = delivery["interrupting"] + delivery["silent"]
     if not updates:
@@ -178,12 +177,14 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
             store.close_session(session_id)
         return {}
     if event == "PreToolUse":
+        if session["active"] and not session["observer"]:
+            with contextlib.suppress(StateError):
+                touch_turn(store, session_id)
         name = value.get("tool_name", "")
-        config = load_config(home, session["project_id"])
-        allowed = set(config["roles"]["orchestrator"]["allowed_tools"])
-        allowed.update({"AskUserQuestion", "ToolSearch"})
+        config = repairable_config(home, session["project_id"])
         trusted = (
-            config.get("execution", {}).get("mode", "restricted") == "trusted"
+            config is not None
+            and config.get("execution", {}).get("mode", "restricted") == "trusted"
             and session["active"]
             and not session["observer"]
             and bool(session["project_id"])
@@ -199,6 +200,11 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
         ):
             reason = (
                 "Native worker observers may only use watch_worker, never execute or control work."
+            )
+        elif config is None and not name.startswith("mcp__orchestrator__"):
+            reason = (
+                "This project's configuration is invalid. Inspect project_settings and repair it "
+                "with configure_project before using other tools."
             )
         elif name == "Agent" and (not trusted or watcher_launch):
             try:
@@ -225,7 +231,11 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
                 reason = "Use this coordinator instance's exact session ID, not another instance."
         elif name.startswith("mcp__"):
             reason = "Use this coordinator's owned Orchestrator MCP namespace."
-        elif not trusted and name not in allowed:
+        elif not trusted and name not in {
+            *config["roles"]["orchestrator"]["allowed_tools"],
+            "AskUserQuestion",
+            "ToolSearch",
+        }:
             reason = (
                 "Direct foreground file tools are read-only; shell commands remain denied. "
                 "For initial routing policy setup, inspect project_setup and use the owned "
@@ -264,6 +274,8 @@ def handle_hook(home: Path, event: str, value: dict) -> dict:
     if not session["active"] or session["observer"] or not session["project_id"]:
         return {}
     if event in {"PostToolUse", "PostToolUseFailure"}:
+        with contextlib.suppress(StateError):
+            touch_turn(store, session_id)
         if _meaningful_tool(value):
             serialized = json.dumps(value.get("tool_input", {}), ensure_ascii=False)
             store.record(

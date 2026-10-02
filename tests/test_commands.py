@@ -11,7 +11,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from orchestrator.commands import BWRAP, OUTPUT_LIMIT, _prepare, run_command
+from orchestrator.commands import (
+    BWRAP,
+    OUTPUT_LIMIT,
+    RESULT_OUTPUT_LIMIT,
+    _prepare,
+    run_command,
+)
 
 
 class CommandConfigurationTests(unittest.TestCase):
@@ -274,11 +280,34 @@ class TrustedCommandTests(unittest.TestCase):
             unrelated.terminate()
             unrelated.wait()
 
-    def test_output_bound(self):
-        result = self.run_script("yes overflow")
-        self.assertTrue(result["output_limited"], result)
-        self.assertEqual(Path(result["log_path"]).stat().st_size, OUTPUT_LIMIT)
-        self.assertEqual(Path(result["log_path"]).read_text(), result["output"])
+    def test_verbose_output_runs_to_completion_with_head_and_tail(self):
+        result = self.run_script(
+            "printf FIRST-LINE; yes verbose-build-line | head -c 3000000; "
+            "printf '\\nFINAL SUMMARY: 2 failed'; exit 4"
+        )
+        self.assertEqual(result["exit_code"], 4, result)
+        self.assertFalse(result["timed_out"])
+        self.assertEqual(result["output_bytes"], len("FIRST-LINE") + 3000000 + 24)
+        self.assertTrue(result["output_truncated"])
+        self.assertTrue(result["log_truncated"])
+        self.assertLessEqual(len(result["output"].encode()), RESULT_OUTPUT_LIMIT + 100)
+        self.assertTrue(result["output"].startswith("FIRST-LINE"))
+        self.assertTrue(result["output"].endswith("FINAL SUMMARY: 2 failed"))
+        self.assertIn("output bytes omitted", result["output"])
+        log = Path(result["log_path"]).read_bytes()
+        self.assertLessEqual(len(log), OUTPUT_LIMIT + 100)
+        self.assertTrue(log.startswith(b"FIRST-LINE"))
+        self.assertTrue(log.endswith(b"FINAL SUMMARY: 2 failed"))
+        metadata = json.loads(Path(result["metadata_path"]).read_text())
+        self.assertEqual(metadata["output_bytes"], result["output_bytes"])
+        self.assertTrue(metadata["log_truncated"])
+
+    def test_small_output_is_complete(self):
+        result = self.run_script("printf complete-output")
+        self.assertEqual(result["output"], "complete-output")
+        self.assertEqual(result["output_bytes"], len("complete-output"))
+        self.assertFalse(result["output_truncated"])
+        self.assertEqual(Path(result["log_path"]).read_text(), "complete-output")
 
 
 class SandboxTests(CommandConfigurationTests):
@@ -379,11 +408,13 @@ class SandboxTests(CommandConfigurationTests):
         self.assertEqual(second["exit_code"], 0, second)
 
     def test_output_bound_and_artifact_correlation(self):
-        result = self.run_script("yes overflow")
-        self.assertTrue(result["output_limited"], result)
+        result = self.run_script("yes overflow | head -c 2000000; printf SANDBOX-TAIL")
+        self.assertEqual(result["exit_code"], 0, result)
+        self.assertTrue(result["log_truncated"], result)
         log = Path(result["log_path"])
-        self.assertEqual(log.stat().st_size, OUTPUT_LIMIT)
-        self.assertEqual(log.read_text(), result["output"])
+        self.assertLessEqual(log.stat().st_size, OUTPUT_LIMIT + 100)
+        self.assertTrue(log.read_text().endswith("SANDBOX-TAIL"))
+        self.assertTrue(result["output"].endswith("SANDBOX-TAIL"))
         self.assertEqual(log.stat().st_mode & 0o777, 0o600)
         metadata = json.loads(Path(result["metadata_path"]).read_text())
         self.assertEqual(metadata["log_path"], str(log))

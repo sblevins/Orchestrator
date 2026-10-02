@@ -1,8 +1,7 @@
-"""Offline tests for the standalone image backend, never using real credentials."""
+"""Offline tests for the owned image backend, never using real credentials."""
 
 import base64
 import hashlib
-import importlib.util
 import io
 import json
 import struct
@@ -14,10 +13,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "orchestrator" / "images.py"
-SPEC = importlib.util.spec_from_file_location("standalone_images", MODULE_PATH)
-images = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(images)
+from orchestrator.config import ConfigurationError, load_config, validate_config
+from orchestrator.pi_tools import owned_module
+
+images = owned_module("images")
 
 
 def chunk(kind, data):
@@ -308,6 +307,49 @@ class ImagesTests(unittest.TestCase):
     def test_request_id_wrong_type_omitted(self):
         result = self.generate(transport=lambda *args: (self.transport(*args)[0], {"secret": "x"}))
         self.assertNotIn("request_id", result)
+
+    def test_saved_model_settings_and_image_requests_accept_the_same_identifiers(self):
+        config = load_config(Path(self.temporary.name))
+        for index, model in enumerate(
+            (
+                "gpt-image-2",
+                "future-image-model-2029",
+                "x" * 256,
+                "x" * 257,
+                "",
+                "-flag",
+                "gpt image",
+                "gpt\x7fimage",
+                "gpt\x85image",
+                "gpt\u200bimage",
+                "gpt\u00a0image",
+                "gpt\ud800image",
+                None,
+            )
+        ):
+            with self.subTest(model=model):
+                config["images"] = {**self.settings, "model": model}
+                self.settings["model"] = model
+                self.arguments["path"] = f"image-{index}.png"
+                try:
+                    validate_config(config)
+                    saved = True
+                except ConfigurationError:
+                    saved = False
+                try:
+                    self.generate()
+                    generated = True
+                except images.ImageError as error:
+                    self.assertEqual(error.code, "invalid_arguments")
+                    generated = False
+                self.assertEqual(saved, generated)
+                self.assertEqual(
+                    saved, model in ("gpt-image-2", "future-image-model-2029", "x" * 256)
+                )
+        self.assertEqual(
+            [payload["model"] for payload, _ in self.calls],
+            ["gpt-image-2", "future-image-model-2029", "x" * 256],
+        )
 
     def test_pinned_model_and_overrides(self):
         self.settings["model"] = "future-image-model-2029"

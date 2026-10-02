@@ -39,7 +39,7 @@ def test_host_options_trusted_and_team():
     )
 
 
-def test_harness_owned_tool_configuration(harness, provider, model):
+def check_harness_owned_tool_configuration(harness, provider, model):
     command = build_worker_command(
         {"execution": {"mode": "trusted"}, "adapters": {harness: {"command": [harness]}}},
         {"harness": harness, "provider": provider, "model": model, "effort": "high"},
@@ -91,7 +91,7 @@ def test_mcp_rechecks_attempt_and_notifications_never_execute():
         assert check.call_count == 1
 
 
-def test_configured_branch_workspace_leaves_source_main_untouched(tmp_path, mode):
+def check_configured_branch_workspace_leaves_source_main_untouched(tmp_path, mode):
     from tests import test_worker_execution as fixtures
 
     fixture = fixtures.WorkspaceTests()
@@ -133,7 +133,7 @@ class WorkerBoundToolsTests(unittest.TestCase):
             ("pi", "openai", "gpt-5.4"),
         ):
             with self.subTest(harness=harness):
-                test_harness_owned_tool_configuration(harness, provider, model)
+                check_harness_owned_tool_configuration(harness, provider, model)
 
     def test_recoverable_matched_tool_error(self):
         from orchestrator.adapters import AdapterError, parse_result
@@ -211,4 +211,6 @@ class WorkerBoundToolsTests(unittest.TestCase):
     def test_branch_base(self):
         for mode in ("read", "write"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
-                test_configured_branch_workspace_leaves_source_main_untouched(Path(directory), mode)
+                check_configured_branch_workspace_leaves_source_main_untouched(
+                    Path(directory), mode
+                )

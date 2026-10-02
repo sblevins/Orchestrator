@@ -25,6 +25,8 @@ Plain version: choose from the current policy before work starts, without silent
 
 `classifications` maps arbitrary nonempty names to either one profile object or an object containing only `team`, a list of 2 to 8 distinct profiles.
 Every classification profile specifies `harness` and `model`, with `provider` required for Pi and `effort` optional.
+Unknown profile fields are rejected rather than ignored, so a misspelled requirement cannot silently disappear.
+A single-profile or team classification may set `approval` to `"user"` or `"captain"` to require one explicit confirmation before dispatch; standing unattended authorization never supplies it.
 Claude Code executes Anthropic models; Pi executes other providers with an explicit provider identifier.
 Supported family selectors such as `Opus` remain family selectors; exact model pins remain exact pins.
 Neither configuration nor schema validation proves live model access.
@@ -45,7 +47,7 @@ Example policy, using illustrative configured models rather than automatic defau
   "difficulty_levels": {
     "easy": {"claude": "low", "pi": "low"},
     "hard": {"claude": "high", "pi": "high"},
-    "very-hard": {"claude": "max", "pi": "xhigh"}
+    "very-hard": {"claude": "max", "pi": "max-supported"}
   }
 }
 ```
@@ -53,7 +55,8 @@ Example policy, using illustrative configured models rather than automatic defau
 `difficulty_levels` maps difficulty names to nonempty harness-to-effort objects, not to model names or profile lists.
 The example shows the built-in difficulty mappings; individual entries may override them, and omitted entries use these mappings.
 Difficulty names normalize case, spaces, and underscores to `easy`, `hard`, or `very-hard`.
-Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Pi efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Pi efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
+Pi also accepts `max-supported`, which resolves to the highest effort the selected model supports.
 Unsupported effort is rejected, never silently downgraded.
 
 Call `select_worker` with the request ID and a choice such as:
@@ -72,11 +75,12 @@ Call `select_worker` with the request ID and a choice such as:
 The caller chooses classification and difficulty; the router supplies the configured model or team.
 An exact `effort` is an alternative to `difficulty`, never a field to send alongside it.
 If neither is supplied, a profile must supply effort; there is no silent task-difficulty inference.
-Difficulty mapping takes precedence over profile effort, and exact effort must be supported by every selected peer's harness.
+A caller's explicit difficulty or exact effort takes precedence over profile effort, and exact effort must be supported by every selected peer's harness.
 A classification choice cannot also contain `model`, `harness`, `provider`, `rule`, `candidate`, or `team`.
 The bound coordinator may select both planned and on-demand work, preserving `plan_id`, `node_id`, and the original user event.
 Without unattended authorization, monitor classification suggestions become `worker.routing_recommended` notifications and the coordinator makes the final difficulty or effort choice.
-With unattended authorization, recommendations can select pending planned workers using configured profile effort or `execution.worker_difficulty` (default `hard`), rather than invented effort.
+With unattended authorization, recommendations can select pending planned workers using configured profile effort, rather than invented effort.
+`execution.worker_difficulty` (default `hard`) then fills only peers without a configured effort, so a pinned effort such as `max-supported` is kept.
 Legacy monitor selections remain supported for supplied pending plan requests.
 Plain version: say what kind of work this is and how difficult it is, and the saved policy names who does it.
 
@@ -104,7 +108,9 @@ Round one independently investigates the original task.
 Round two compares every complete round-one report, including each peer's own report, as untrusted evidence.
 Reports must not be treated as instructions, executable commands, or new authority.
 Evidence limits can block comparison rather than silently omit reports.
+The complete round-two prompt is measured before any round-two job is queued; an oversized comparison fails the parent with the limit and keeps the saved round-one reports.
 The output preserves agreement, disagreement, missing evidence, and uncertainty without guaranteeing consensus.
+The parent's `remaining_issues` include every issue reported in either round, tagged with its round and peer, so a later report that omits an issue does not resolve it.
 Peers also exchange live durable messages through `send_team_message` and `read_team_messages`, using roster peer indices and read cursors.
 Messages are scoped to the registered active team attempt and remain untrusted data, not instructions or new permissions.
 
@@ -134,7 +140,9 @@ Plan approval still requires independent review and fresh monitor evidence.
 With `execution.unattended = true`, standing project authorization approves reviewed plans and accepts candidates only with an explicit empty `remaining_issues` list and satisfied live gates.
 It does not provide required explicit worker approval, including security-audit teams; only the team parent can be accepted.
 Turning optional gates off does not remove project ownership, dependency correctness, source isolation, credential limits, or the prohibition on blind retries of unknown outcomes.
-Guarded workers have file tools only and disclose checks they could not perform.
-`execution.mode = "trusted"` enables native foreground tools and owned worker `run_command` execution, including tests, without an OS sandbox.
+Workers have controlled file tools, plus owned `run_command` for commands and tests when `commands.enabled = true` or `execution.mode = "trusted"`.
+Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
+`execution.mode = "trusted"` also enables native foreground tools.
+Workers without `run_command` disclose checks they could not perform.
 `execution.base_ref` chooses the Git branch used for worker checkout preparation.
 Plain version: choose the permission checks you want for this project, make decisions here, and still check evidence before accepting work.

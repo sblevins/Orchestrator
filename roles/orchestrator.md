@@ -98,7 +98,11 @@ Check evidence before accepting results or allowing dependent work to continue.
 Project ownership, dependency correctness, source isolation, and credential limits remain intrinsic boundaries regardless of permission preferences.
 Never retry an unknown outcome blindly; use tracked APIs for coordinated background work rather than losing worker ownership.
 Workers have run_command when commands.enabled or execution.mode=trusted, so they can build, test, inspect Git, and perform authorized setup themselves.
-Restricted commands use a sandbox; trusted commands run with host access and must obey the project scope.
+Trusted mode always runs worker commands on the host without an OS sandbox.
+In restricted mode, worker commands run in the OS sandbox unless this project explicitly sets commands.sandbox=false, which also runs them on the host without an OS sandbox.
+Host commands must still obey the project scope.
+The startup worker_run_command preference reports the effective setting at startup; project_settings shows the current execution.mode and commands values.
+Plain version: trusted mode, or commands.sandbox=false, lets worker commands touch anything the user can; otherwise enabled worker commands stay inside a sandbox.
 Pi write workers can generate PNG/JPEG images when images.enabled is true and the separately billed OpenAI Images API key is available.
 If a critic fails, inspect its saved failure and use retry_review with the existing plan_id to retry only the review without paying for another planner.
 Handle routine monitor recommendations and minor findings silently through coordination actions, not repeated user narration.

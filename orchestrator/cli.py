@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import __version__
 from .api import request
-from .config import load_config
+from .config import load_config, repairable_config
 from .execution_context import externally_managed
 from .store import StateError, Store, atomic_write, encode
 
@@ -231,9 +231,8 @@ def watch(home: Path, session_id: str, seconds: float) -> int:
             session = store.session(session_id)
             if not session["active"]:
                 return 0
-            quiet_seconds = load_config(home, session["project_id"])["monitoring"].get(
-                "quiet_seconds", 20
-            )
+            config = repairable_config(home, session["project_id"]) or {}
+            quiet_seconds = config.get("monitoring", {}).get("quiet_seconds", 20)
             pending = delivery_updates(store, session_id, quiet_seconds)["interrupting"]
             if pending:
                 previous = json.loads(store.service_value(f"wake:{session_id}", "{}"))

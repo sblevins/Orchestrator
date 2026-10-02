@@ -951,10 +951,13 @@ class Store:
             from .config import load_config
             from .monitoring import should_review
 
-            quiet = (
-                load_config(self.home, project_id).get("monitoring", {}).get("quiet_seconds", 20)
-            )
-            if not should_review(database, project_id, quiet):
+            monitoring = load_config(self.home, project_id).get("monitoring", {})
+            if not should_review(
+                database,
+                project_id,
+                monitoring.get("quiet_seconds", 20),
+                monitoring.get("foreground_stale_seconds", 900),
+            ):
                 return None
             if database.execute(
                 "SELECT 1 FROM tasks WHERE project_id=? AND role='monitor' AND state IN ('queued','starting','running')",
@@ -994,8 +997,12 @@ class Store:
             with self.transaction() as database:
                 from .monitoring import should_review
 
+                monitoring = config.get("monitoring", {})
                 if not should_review(
-                    database, project_id, config.get("monitoring", {}).get("quiet_seconds", 20)
+                    database,
+                    project_id,
+                    monitoring.get("quiet_seconds", 20),
+                    monitoring.get("foreground_stale_seconds", 900),
                 ):
                     return None
                 task_id = self._enqueue(

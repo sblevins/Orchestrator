@@ -312,7 +312,7 @@ class WorkerService:
         if request["task_id"] or request["state"] not in ("pending", "selected"):
             raise StateError("An attempted worker cannot be reselected, refreshed, or replayed")
 
-    def _select(self, database, request, choice, source, override=False):
+    def _select(self, database, request, choice, source, override=False, fallback_difficulty=None):
         from .routing import resolve_selection
 
         self._independent(database, request)
@@ -339,7 +339,11 @@ class WorkerService:
                 "Recommend classification in monitor findings; the coordinator chooses effort and routes it"
             )
         profile = resolve_selection(
-            policy, choice, evidence=request["evidence"], operator_override=override
+            policy,
+            choice,
+            evidence=request["evidence"],
+            operator_override=override,
+            fallback_difficulty=fallback_difficulty,
         )
         if "team" in profile:
             if request["mode"] != "read":
@@ -572,19 +576,15 @@ class WorkerService:
                         "rationale": "Standing project routing recommendation: "
                         + str(selection["choice"].get("rationale", ""))[:4000],
                     }
-                    snapshot = json.loads(
-                        database.execute(
-                            "SELECT policy_json FROM worker_policies WHERE digest=?",
-                            (request["policy_digest"],),
-                        ).fetchone()[0]
-                    )
-                    route = snapshot.get("classifications", {}).get(choice["classification"], {})
-                    profiles = route.get("team", [route])
-                    if not profiles or any("effort" not in profile for profile in profiles):
-                        choice["difficulty"] = configuration["execution"].get(
+                    self._select(
+                        database,
+                        request,
+                        choice,
+                        "standing:" + current["id"],
+                        fallback_difficulty=configuration["execution"].get(
                             "worker_difficulty", "hard"
-                        )
-                    self._select(database, request, choice, "standing:" + current["id"])
+                        ),
+                    )
                     continue
                 self.store._event(
                     database,
@@ -746,7 +746,10 @@ class WorkerService:
         ).fetchall():
             from .graphs import ready_nodes
 
-            config = load_config(self.store.home, plan["project_id"])
+            try:
+                config = load_config(self.store.home, plan["project_id"])
+            except ValueError:
+                continue
             states = {
                 row["node_id"]: row["state"]
                 for row in database.execute(

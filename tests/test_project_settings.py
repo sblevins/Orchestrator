@@ -159,6 +159,113 @@ class ProjectSettingsTests(unittest.TestCase):
                 configure_project(self.store, "alpha", settings)
         self.assertFalse(self.path.exists())
 
+    def test_unknown_nested_settings_are_rejected_with_spelling_guidance(self):
+        for settings, guidance in (
+            ({"execution": {"unatended": True}}, "did you mean execution.unattended"),
+            ({"exection": {"unattended": True}}, "did you mean execution"),
+            ({"monitoring": {"quiet_secs": 5}}, "did you mean monitoring.quiet_seconds"),
+            ({"roles": {"planer": {"effort": "low"}}}, "did you mean roles.planner"),
+            ({"roles": {"planner": {"efort": "low"}}}, "did you mean roles.planner.effort"),
+            ({"execution": {"mode": {"trusted": True}}}, "execution.mode has no nested"),
+        ):
+            with (
+                self.subTest(settings=settings),
+                self.assertRaisesRegex(ConfigurationError, guidance),
+            ):
+                configure_project(self.store, "alpha", settings)
+        self.assertFalse(self.path.exists())
+        result = configure_project(
+            self.store,
+            "alpha",
+            {
+                "roles": {
+                    "planner": {
+                        "adapter": "pi",
+                        "provider": "openai-codex",
+                        "model": "gpt-6-astra",
+                    }
+                },
+                "monitoring": {"quiet_seconds": 5},
+                "commands": {"tool_paths": {"forge": "/usr/local/bin/forge"}},
+                "supervisor": {"task_timeout_seconds": 120, "task_memory": "4G"},
+            },
+        )
+        settings = result["settings"]
+        self.assertEqual(settings["roles"]["planner"]["provider"], "openai-codex")
+        self.assertEqual(settings["monitoring"]["quiet_seconds"], 5)
+        self.assertEqual(settings["commands"]["tool_paths"], {"forge": "/usr/local/bin/forge"})
+        self.assertEqual(settings["supervisor"]["task_timeout_seconds"], 120)
+        self.assertEqual(load_config(self.home, "beta")["roles"]["planner"]["adapter"], "claude")
+
+    def test_process_wide_supervisor_settings_point_to_project_settings(self):
+        baseline = load_config(self.home)
+        with self.assertRaisesRegex(ConfigurationError, "use execution.max_parallel"):
+            configure_project(self.store, "alpha", {"supervisor": {"max_parallel": 8}})
+        with self.assertRaisesRegex(ConfigurationError, "config/local.toml"):
+            configure_project(self.store, "alpha", {"supervisor": {"poll_seconds": 0.5}})
+        self.assertFalse(self.path.exists())
+        self.assertEqual(load_config(self.home), baseline)
+        result = configure_project(self.store, "alpha", {"execution": {"max_parallel": 1}})
+        self.assertEqual(result["settings"]["execution"]["max_parallel"], 1)
+
+    def test_null_removes_only_this_project_override(self):
+        self.path.parent.mkdir(parents=True)
+        (self.home / "config/local.toml").write_text('[execution]\nworker_difficulty = "easy"\n')
+        self.path.write_text(
+            json.dumps({"execution": {"unatended": True}, "supervisor": {"max_parallel": 8}})
+        )
+        configure_project(
+            self.store,
+            "alpha",
+            {"execution": {"worker_difficulty": "very-hard", "unattended": True}},
+        )
+        configure_project(self.store, "beta", {"execution": {"unattended": True}})
+        result = configure_project(
+            self.store,
+            "alpha",
+            {
+                "execution": {"worker_difficulty": None, "unattended": None, "unatended": None},
+                "supervisor": {"max_parallel": None},
+            },
+        )
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["settings"]["execution"]["worker_difficulty"], "easy")
+        self.assertFalse(result["settings"]["execution"]["unattended"])
+        self.assertEqual(json.loads(self.path.read_text()), {})
+        self.assertTrue(load_config(self.home, "beta")["execution"]["unattended"])
+        self.assertEqual(load_config(self.home)["execution"]["worker_difficulty"], "easy")
+        unchanged = configure_project(self.store, "alpha", {"execution": {"unattended": None}})
+        self.assertFalse(unchanged["changed"])
+        self.assertEqual(unchanged["revision"], result["revision"])
+        with self.assertRaisesRegex(ConfigurationError, "did you mean execution.unattended"):
+            configure_project(self.store, "alpha", {"execution": {"unatended": None}})
+
+    def test_invalid_project_is_reported_and_repaired_from_its_unvalidated_layers(self):
+        configure_project(self.store, "alpha", {"supervisor": {"heartbeat_seconds": 20}})
+        (self.home / "config/local.toml").write_text("[supervisor]\nstale_seconds = 15.0\n")
+        with self.assertRaisesRegex(ConfigurationError, "stale_seconds must exceed"):
+            load_config(self.home, "alpha")
+        self.assertEqual(load_config(self.home, "beta")["supervisor"]["stale_seconds"], 15.0)
+        snapshot = project_settings(self.store, "alpha")
+        self.assertIn("stale_seconds must exceed", snapshot["error"])
+        self.assertEqual(snapshot["settings"]["supervisor"]["heartbeat_seconds"], 20)
+        with self.assertRaisesRegex(ConfigurationError, "stale_seconds must exceed"):
+            configure_project(self.store, "alpha", {"workers": {"enabled": False}})
+        repaired = configure_project(
+            self.store,
+            "alpha",
+            {"supervisor": {"heartbeat_seconds": None}},
+            snapshot["revision"],
+        )
+        self.assertEqual(repaired["settings"]["supervisor"]["heartbeat_seconds"], 5.0)
+        self.assertEqual(load_config(self.home, "alpha"), repaired["settings"])
+        self.assertNotIn("error", project_settings(self.store, "alpha"))
+
+    def test_image_model_with_control_character_is_not_saved(self):
+        with self.assertRaisesRegex(ConfigurationError, "images.model"):
+            configure_project(self.store, "alpha", {"images": {"model": "gpt\x7fimage"}})
+        self.assertFalse(self.path.exists())
+
     def test_concurrent_partial_patches_do_not_lose_updates(self):
         patches = [{"workers": {"enabled": False}}, {"execution": {"max_parallel": 2}}]
         with ThreadPoolExecutor(max_workers=2) as executor:

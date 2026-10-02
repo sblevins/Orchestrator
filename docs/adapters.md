@@ -11,8 +11,8 @@ Plain version: the configured model determines which approved program runs the t
 Specialists receive `-p --output-format json`, explicit `--model` and `--effort`, `--permission-mode dontAsk`, and matching `--tools` and `--allowedTools` lists.
 The specialist allowlist is a validated subset of `Read,Glob,Grep`; an empty list disables tools rather than restoring defaults.
 Workers additionally receive `--restricted`, with `Read,Glob,Grep` for reading and `Edit,Write` added only in write mode.
-Restricted workers receive file tools by default; `commands.enabled` adds owned command execution using the configured sandbox.
-Trusted workers receive owned `run_command` automatically without an OS sandbox.
+Restricted workers receive file tools by default; `commands.enabled` adds owned `run_command`, which uses the OS sandbox unless `commands.sandbox = false`.
+Trusted workers receive owned `run_command` automatically, always without an OS sandbox.
 Native permission prompts are not automatically approved.
 Write workers are not granted the source checkout as an additional directory.
 
@@ -22,7 +22,7 @@ These controls are not an operating-system sandbox or a bypass of managed policy
 Claude specialist resume uses an explicit saved conversation ID through `--resume`, with the same model selector, effort, and permissions.
 The selector may be an exact ID or a canonical native family alias; a family can resolve differently on a later launch.
 Worker invocations start fresh instead of inheriting a conversation.
-Plain version: guarded workers get only the listed file tools; trusted commands can act outside those file-tool limits.
+Plain version: workers get the listed file tools; unsandboxed commands can act outside those file-tool limits.
 
 ## Owned Pi SDK bridge
 
@@ -62,11 +62,11 @@ Credential files, orchestration control state, Git metadata, paths outside autho
 An individual file access error is recoverable: the model can correct its path and continue without restarting the task.
 Writes are confined to a separate worker checkout; the source project is readable but not writable through these tools.
 `grep` uses literal text, not regular expressions.
-Command-enabled restricted workers use the configured sandbox; trusted workers can build and test with host access.
+Command-enabled restricted workers use the OS sandbox unless `commands.sandbox = false`; trusted workers can build and test with host access.
 Trusted commands receive host toolchain paths and the user home for installed tools and Git identity, but API-key environment variables are not copied into commands.
-Trusted command execution is unsandboxed and does not inherit file-tool path containment.
+Trusted and `commands.sandbox = false` command execution is unsandboxed and does not inherit file-tool path containment.
 These are model-tool controls, not hostile-process isolation or an OS sandbox.
-Plain version: guarded tools only read or edit allowed files, while trusted commands can do more and must be used with care.
+Plain version: file tools only read or edit allowed files, while unsandboxed commands can do more and must be used with care.
 
 ## Normalized results
 

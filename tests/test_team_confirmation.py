@@ -111,6 +111,44 @@ class TeamConfirmationTests(unittest.TestCase):
         advance(self.store)
         self.assertEqual(self.workers.get(parent["id"])["state"], "accepted")
 
+    def test_round_one_finding_waits_for_foreground_acceptance(self):
+        from orchestrator.runtime import run_task
+
+        self.operation("configure_project", {"settings": {"execution": {"unattended": True}}})
+        harness = self.root / "offline-harness"
+        harness.write_text(
+            harness.read_text().replace(
+                "['Unverified hypothesis']",
+                "[] if comparison else ['Possible SQL injection in X']",
+            )
+        )
+        origin = self.operation("record_prompt", {"prompt": "Audit"})["event_id"]
+        parent = self.operation("request_worker", {"brief": "Audit", "origin_event_id": origin})
+        self.operation(
+            "select_worker",
+            {
+                "request_id": parent["id"],
+                "choice": {"classification": "audit", "difficulty": "hard", "rationale": "Audit"},
+            },
+        )
+        self.workers.dispatch_ready()
+        for _round in range(2):
+            self.workers.dispatch_ready()
+            while task := self.store.claim_next(4):
+                self.assertEqual(run_task(self.home, task["id"], task["token"]), 0)
+                self.workers.process_result(self.store.task(task["id"]))
+        self.workers.dispatch_ready()
+        issues = self.workers.get(parent["id"])["result"]["remaining_issues"]
+        self.assertEqual(
+            issues, [f"Round 1 peer {index}: Possible SQL injection in X" for index in range(4)]
+        )
+        advance(self.store)
+        self.assertEqual(self.workers.get(parent["id"])["state"], "candidate")
+        accepted = self.operation(
+            "accept_worker", {"request_id": parent["id"], "reason": "Reviewed audit findings"}
+        )
+        self.assertEqual(accepted["state"], "accepted")
+
     def test_latest_families_and_explicit_research_effort(self):
         # Provider is explicitly supplied here as a fixture, not guessed for a user project.
         profiles = [

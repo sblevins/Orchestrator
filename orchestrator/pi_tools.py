@@ -34,6 +34,9 @@ CONTROL_NAMES = {
     "secrets.json",
     "id_rsa",
     "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+    "_netrc",
 }
 READ_TOOLS = {"read", "find", "grep", "ls"}
 WRITE_TOOLS = {"edit", "write"}
@@ -89,7 +92,20 @@ def forbidden(part, write=False, trusted=False):
         return (
             normalized in (CONTROL_NAMES - {"agents", "claude"})
             or normalized
-            in {".git", ".orchestrator", ".ssh", ".aws", ".gnupg", ".npmrc", ".pypirc", ".netrc"}
+            in {
+                ".git",
+                ".orchestrator",
+                ".ssh",
+                ".aws",
+                ".gnupg",
+                ".docker",
+                ".kube",
+                ".npmrc",
+                ".pypirc",
+                ".netrc",
+                ".pgpass",
+                ".git-credentials",
+            }
             or normalized.startswith((".env", "credentials.", "secrets."))
             or normalized.endswith((".pem", ".key", ".p12", ".pfx"))
         )
@@ -155,9 +171,9 @@ class FileBroker:
         if ".." in supplied.parts:
             raise AuthorityError("parent traversal is forbidden")
         absolute = supplied if supplied.is_absolute() else self.cwd / supplied
-        if self.trusted:
+        if self.trusted or not write:
             # Resolve ordinary project aliases, then recheck the resolved root and path policy.
-            # Restricted mode retains no-follow traversal throughout.
+            # Restricted writes retain no-follow traversal throughout.
             try:
                 absolute = absolute.resolve(strict=False)
             except (OSError, RuntimeError) as error:
@@ -355,7 +371,7 @@ class FileBroker:
                 "code": getattr(error, "code", "image_generation_failed"),
                 "ambiguous": bool(getattr(error, "ambiguous", False)),
             }
-        return json.dumps(result, ensure_ascii=True, allow_nan=False)
+        return json.dumps(result, ensure_ascii=False, allow_nan=False)
 
     def walk(self, root, parts):
         pending = [parts]
@@ -385,13 +401,13 @@ class FileBroker:
             if not self.commands:
                 raise PolicyError("Command configuration is missing")
             result = owned_module("commands").run_command(self.commands, arguments)
-            return json.dumps(result, ensure_ascii=True, allow_nan=False)
+            return json.dumps(result, ensure_ascii=False, allow_nan=False)
         if name in {"send_team_message", "read_team_messages"}:
             context = self.worker_context or {}
             result = owned_module("team_messages").execute(
                 context["home"], context["task_id"], context["token"], name, arguments
             )
-            return json.dumps(result, ensure_ascii=True, allow_nan=False)
+            return json.dumps(result, ensure_ascii=False, allow_nan=False)
         if name == "generate_image":
             return self.generate_image(arguments)
         allowed = READ_TOOLS | (WRITE_TOOLS if self.mode == "write" else set())
@@ -567,8 +583,8 @@ def serve(options):
                     "fatal": False,
                     "error": "Permission denied for this path; choose an accessible project path",
                 }
-            except PolicyError as error:
-                response = {"ok": False, "fatal": False, "error": str(error)}
+            except ValueError as error:
+                response = {"ok": False, "fatal": False, "error": str(error)[:1000]}
             except Exception as error:  # noqa: BLE001 - tool protocol must return sanitized failures
                 # No provider response, command content, credentials, or token in errors.
                 response = {
@@ -578,7 +594,17 @@ def serve(options):
                     + type(error).__name__
                     + "); check arguments and the current worker state",
                 }
-            print(json.dumps(response, ensure_ascii=True), flush=True)
+            frame = json.dumps(response, ensure_ascii=True)
+            if len(frame) + 1 > 2 * MAX_BYTES:
+                frame = json.dumps(
+                    {
+                        "ok": False,
+                        "fatal": False,
+                        "error": "Tool result exceeds the transport limit; "
+                        "narrow the request with a smaller limit, path, or offset",
+                    }
+                )
+            print(frame, flush=True)
     finally:
         broker.close()
 

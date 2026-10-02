@@ -115,7 +115,7 @@ Each role configures its adapter, model, and effort.
 Shared supervisor timeouts and resource reservations protect the machine without requiring separate limits for every role.
 There is no enforced dollar spending cap.
 See <a href="https://github.com/sblevins/Orchestrator/blob/main/docs/configuration.md">configuration</a> for the supported fields.</p>
-<p>Guarded workers have file tools only.
+<p>Guarded workers have file tools, plus a sandboxed <code>run_command</code> when <code>commands.enabled = true</code>; <code>commands.sandbox = false</code> runs those commands on the host.
 <code>execution.mode = "trusted"</code> enables native foreground tools and owned worker <code>run_command</code> for commands and tests.
 Trusted commands are not an operating-system sandbox and can act outside file-tool path restrictions.
 <code>execution.base_ref</code> selects the Git branch for worker checkouts, not a directory.

@@ -42,10 +42,11 @@ In plain English: uncertain work is reported as uncertain, not silently repeated
 ## Inputs, results, and privacy
 
 Each attempt stores artifacts in a private directory below `data/runs/TASK/TOKEN`.
-Write workers execute in isolated Git worktrees; read workers have only controlled reading tools.
+Write workers execute in isolated Git worktrees; read workers have controlled reading tools.
 The complete prompt is saved in `prompt.txt`, including the tracked role instructions, personalization, canonical source-root context, and task evidence.
 Core specialists have read-only tools; authorized write workers add file editing tools.
-Trusted workers additionally have owned `run_command` for unsandboxed command and test execution.
+Trusted workers, and restricted workers with `commands.enabled = true`, additionally have owned `run_command` for command and test execution.
+Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
 No permission bypass is added.
 Claude receives the canonical project root through `--add-dir`; Pi uses owned path-limited file tools without inherited orchestration integrations.
 A private working directory and read-only tools are not a hostile-process isolation boundary.

@@ -41,7 +41,7 @@ Native foreground changes still use `/model` and `/effort`.
 Arbitrary adapter and frontend executable commands cannot be configured conversationally because they can affect things outside the project.
 Classifications map names to a profile or `{team: [profiles]}`; the caller chooses `easy`, `hard`, or `very-hard` difficulty, or exact effort.
 Profiles specify model, harness, Pi provider, and optional effort; legacy single-profile rules/default routing still works.
-In guarded mode workers have controlled file tools only.
+In guarded mode workers have controlled file tools only, unless `commands.enabled = true` adds `run_command`, which runs in the OS sandbox unless `commands.sandbox = false`.
 `execution.mode = "trusted"` enables native foreground tools and the owned worker `run_command` tool for commands and tests without an OS sandbox.
 `execution.base_ref` selects the Git branch used to prepare worker checkouts; it does not select a filesystem path.
 Plain version: save and repair this project's choices here; trusted mode separately allows commands.

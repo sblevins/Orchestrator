@@ -1,16 +1,21 @@
 """Conversational settings edits confined to the active session's project."""
 
 import contextlib
+import difflib
 import hashlib
 import os
 import secrets
+from copy import deepcopy
 
 from .config import (
+    DEFAULT_CONFIG,
     PROJECT_SETTINGS_LIMIT,
-    _merge,
+    ConfigurationError,
+    _read,
     load_config,
     project_config_directory,
     read_project_override,
+    unvalidated_config,
     validate_config,
 )
 from .onboarding import _session
@@ -21,17 +26,97 @@ MESSAGE = (
     "Project permissions, worker enablement and worker concurrency are live controls. "
     "To change the native foreground model or effort, use /model and /effort."
 )
+OPEN_SETTINGS = {("planning", "templates"), ("commands", "tool_paths")}
+PROCESS_WIDE_SETTINGS = {
+    ("supervisor", "max_parallel"): (
+        "supervisor.max_parallel is shared by all projects; "
+        "use execution.max_parallel to limit this project's concurrent workers"
+    ),
+    ("supervisor", "poll_seconds"): (
+        "supervisor.poll_seconds is shared by all projects and has no project setting; "
+        "the operator sets it in config/local.toml"
+    ),
+}
+
+
+def _schema():
+    schema = _read(DEFAULT_CONFIG)
+    role_fields = {field for role in schema["roles"].values() for field in role}
+    for role in schema["roles"].values():
+        for field in role_fields:
+            role.setdefault(field, None)
+    return schema
+
+
+def _check_names(settings, schema, override, location=()):
+    for key, value in settings.items():
+        path = (*location, key)
+        name = ".".join(path)
+        if value is None and key in override:
+            continue
+        if path in PROCESS_WIDE_SETTINGS:
+            if value is None:
+                continue
+            raise ConfigurationError(PROCESS_WIDE_SETTINGS[path])
+        if path in OPEN_SETTINGS:
+            continue
+        if not isinstance(schema, dict) or key not in schema:
+            choices = sorted(schema) if isinstance(schema, dict) else []
+            suggestion = difflib.get_close_matches(key, choices, n=1)
+            raise ConfigurationError(
+                f"Unknown project setting {name}"
+                + (f"; did you mean {'.'.join((*location, suggestion[0]))}?" if suggestion else "")
+                + (
+                    f" Supported {'.'.join(location) or 'sections'}: {', '.join(choices)}"
+                    if choices
+                    else f" {'.'.join(location)} has no nested settings"
+                )
+            )
+        if isinstance(value, dict):
+            nested = override.get(key)
+            _check_names(value, schema[key], nested if isinstance(nested, dict) else {}, path)
+
+
+def _apply(override, settings):
+    result = deepcopy(override)
+    for key, value in settings.items():
+        if value is None:
+            result.pop(key, None)
+        elif isinstance(value, dict):
+            nested = result.get(key)
+            merged = _apply(nested if isinstance(nested, dict) else {}, value)
+            if merged or not value:
+                result[key] = merged
+            else:
+                result.pop(key, None)
+        else:
+            result[key] = deepcopy(value)
+    return result
+
+
+def _command(config, section, name):
+    table = config.get(section)
+    entry = table.get(name) if isinstance(table, dict) else None
+    return entry.get("command") if isinstance(entry, dict) else None
 
 
 def _snapshot(store, session, project):
-    _, revision = read_project_override(store.home, project["id"])
-    return {
+    override, revision = read_project_override(store.home, project["id"])
+    snapshot = {
         "project_id": project["id"],
-        "settings": load_config(store.home, project["id"]),
         "revision": revision,
         "can_configure": bool(session["active"]) and not bool(session["observer"]),
         "message": MESSAGE,
     }
+    try:
+        snapshot["settings"] = load_config(store.home, project["id"])
+    except ConfigurationError as error:
+        snapshot["settings"] = unvalidated_config(store.home, project["id"], override)
+        snapshot["error"] = (
+            f"{error}. Repair this project's settings with configure_project; "
+            "a null value removes this project's override and restores the inherited setting."
+        )
+    return snapshot
 
 
 def project_settings(store, session_id):
@@ -42,7 +127,10 @@ def project_settings(store, session_id):
 
 
 def configure_project(store, session_id, settings, expected_revision=None):
-    """Deep-merge supported settings into only this project's private JSON override."""
+    """Deep-merge supported settings into only this project's private JSON override.
+
+    A null value removes only this project's override, revealing the inherited setting.
+    """
     if not isinstance(settings, dict):
         raise StateError("settings must be an object")
     if expected_revision is not None and (
@@ -55,11 +143,10 @@ def configure_project(store, session_id, settings, expected_revision=None):
         override, revision = read_project_override(store.home, project_id)
         if expected_revision is not None and expected_revision != revision:
             raise StateError("Project settings changed; reread project_settings before saving")
-        current = load_config(store.home, project_id)
-        supported = set(current) | {"permissions"}
-        if set(settings) - supported:
-            raise StateError("Supported settings sections: " + ", ".join(sorted(supported)))
-        effective = _merge(current, settings)
+        _check_names(settings, _schema(), override)
+        updated = _apply(override, settings)
+        current = unvalidated_config(store.home, project_id, override)
+        effective = unvalidated_config(store.home, project_id, updated)
         validate_config(effective)
         # A replacement executable can ignore all harness safety flags. Chat settings
         # can tune roles and resources, but cannot install executable entry points.
@@ -68,10 +155,19 @@ def configure_project(store, session_id, settings, expected_revision=None):
                 if (
                     isinstance(value, dict)
                     and "command" in value
-                    and value["command"] != current.get(section, {}).get(name, {}).get("command")
+                    and value["command"] != _command(current, section, name)
                 ):
                     raise StateError("Executable commands cannot be changed conversationally")
-        text = encode(_merge(override, settings)) + "\n"
+        if updated == override:
+            return {
+                "project_id": project_id,
+                "settings": effective,
+                "revision": revision,
+                "can_configure": True,
+                "changed": False,
+                "message": MESSAGE,
+            }
+        text = encode(updated) + "\n"
         raw = text.encode("utf-8")
         if len(raw) > PROJECT_SETTINGS_LIMIT:
             raise StateError("Project settings exceed 1 MiB")

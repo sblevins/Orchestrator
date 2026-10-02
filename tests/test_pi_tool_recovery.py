@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import unittest
+from pathlib import Path
 
 from tests import test_pi_adapter as fixtures
 
@@ -228,6 +229,118 @@ class ToolRecoveryTests(unittest.TestCase):
         self.assertEqual(
             {tool["function"]["name"] for tool in self.requests[0]["tools"]}, {"run_command"}
         )
+
+    @staticmethod
+    def tool_call(identifier, name, arguments):
+        return {
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "id": identifier,
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }
+            ]
+        }
+
+    def test_verbose_commands_finish_and_return_their_summary(self):
+        self.options.update(tool_names=["run_command"], commands=self.command_options())
+        script = (
+            "yes '\u6f22\u5b57 \001\033[31m verbose build line' | head -c 1500000; "
+            "printf '\nTEST SUMMARY: run %s failed\n' {index}; exit 1"
+        )
+        commands = 10
+        responses = [
+            self.tool_call(f"build-{index}", "run_command", {"command": script.format(index=index)})
+            for index in range(commands)
+        ]
+        responses.append({"content": "builds reviewed"})
+        with self.server(responses) as models:
+            result = self.run_bridge(models)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout[-2000:])
+        self.assertEqual(fixtures.parse_result("pi", result.stdout, 0)["text"], "builds reviewed")
+        for index in range(commands):
+            self.assertIn(f"TEST SUMMARY: run {index} failed", json.dumps(self.requests[index + 1]))
+        metadata = [
+            json.loads(path.read_text()) for path in (self.root / "artifacts").glob("*.json")
+        ]
+        self.assertEqual(len(metadata), commands)
+        for record in metadata:
+            self.assertEqual(record["exit_code"], 1)
+            self.assertFalse(record["timed_out"])
+            self.assertGreater(record["output_bytes"], 1024 * 1024)
+            self.assertTrue(record["log_truncated"])
+            self.assertTrue(Path(record["log_path"]).read_bytes().endswith(b"failed\n"))
+
+    def test_command_validation_error_is_actionable(self):
+        self.options.update(tool_names=["run_command"], commands=self.command_options())
+        responses = [
+            self.tool_call("outside", "run_command", {"command": "true", "cwd": "../outside"}),
+            {"content": "corrected the working directory"},
+        ]
+        with self.server(responses) as models:
+            result = self.run_bridge(models)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("cwd must be a contained relative directory", json.dumps(self.requests[1]))
+
+    def test_restricted_instruction_alias_and_outside_alias(self):
+        (self.source / "AGENTS.md").write_text("Restricted project instructions")
+        (self.source / "CLAUDE.md").symlink_to("AGENTS.md")
+        (self.source / "escape.md").symlink_to(self.auth)
+        self.auth.write_text(
+            json.dumps({"fixture": {"type": "api_key", "key": "private-sentinel"}})
+        )
+        responses = [
+            self.tool_call("alias", "read", {"path": "CLAUDE.md"}),
+            self.tool_call("escape", "read", {"path": "escape.md"}),
+            {"content": "instructions reviewed"},
+        ]
+        with self.server(responses) as models:
+            result = self.run_bridge(models)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("Restricted project instructions", json.dumps(self.requests[1]))
+        self.assertIn("outside allowed roots", json.dumps(self.requests[2]))
+        self.assertNotIn("private-sentinel", result.stdout + json.dumps(self.requests))
+
+    def test_oversized_tool_result_is_recoverable(self):
+        from tests.test_team_messages import TeamMessageTests
+
+        team = TeamMessageTests()
+        team.setUp()
+        self.addCleanup(team.doCleanups)
+        for _ in range(50):
+            team.call(1, "send_team_message", message="\u6f22" * 16000)
+        task = team.tasks[0]
+        options = {
+            **self.options,
+            "tool_names": ["read_team_messages"],
+            "worker_context": {
+                "home": str(team.home),
+                "task_id": task["id"],
+                "token": task["token"],
+            },
+        }
+        requests = [
+            {"name": "read_team_messages", "arguments": {"limit": 50}},
+            {"name": "read_team_messages", "arguments": {"limit": 2}},
+        ]
+        result = subprocess.run(
+            [sys.executable, "-I", str(fixtures.BROKER), "serve", json.dumps(options)],
+            input="".join(json.dumps(request) + "\n" for request in requests),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 2, result.stderr)
+        self.assertTrue(all(len(line) + 1 <= 2 * 1024 * 1024 for line in lines))
+        oversized, narrowed = (json.loads(line) for line in lines)
+        self.assertEqual(oversized["ok"], False)
+        self.assertEqual(oversized["fatal"], False)
+        self.assertIn("transport limit", oversized["error"])
+        self.assertTrue(narrowed["ok"])
+        self.assertEqual(len(json.loads(narrowed["text"])["messages"]), 2)
 
     def test_isolated_owned_package_imports(self):
         script = (

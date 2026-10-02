@@ -63,13 +63,14 @@ class TeamTests(unittest.TestCase):
         with contextlib.closing(self.store.connect()) as database:
             return teams.members(database, "parent")
 
-    def complete_round(self, round_number):
+    def complete_round(self, round_number, **fields):
         with self.store.transaction() as database:
             for child in teams.members(database, "parent"):
                 if child["round"] == round_number:
                     report = {
                         **REPORT,
                         "summary": f"Peer {child['peer_index']} round {round_number}",
+                        **fields,
                     }
                     database.execute(
                         "UPDATE worker_requests SET state='candidate',result_json=? WHERE id=?",
@@ -236,6 +237,47 @@ class TeamTests(unittest.TestCase):
         parent = self.service.get("parent")
         self.assertEqual(parent["state"], "failed")
         self.assertIn("not truncated", parent["error"])
+
+    def test_round_one_issues_survive_clean_comparisons(self):
+        self.start()
+        self.complete_round(1, remaining_issues=["Possible SQL injection in X"])
+        teams.advance(self.service)
+        self.complete_round(2, remaining_issues=[])
+        teams.advance(self.service)
+        parent = self.service.get("parent")
+        self.assertEqual(parent["state"], "candidate")
+        self.assertEqual(
+            parent["result"]["remaining_issues"],
+            [
+                "Round 1 peer 0: Possible SQL injection in X",
+                "Round 1 peer 1: Possible SQL injection in X",
+            ],
+        )
+
+    def test_clean_rounds_report_no_issues(self):
+        self.start()
+        self.complete_round(1, remaining_issues=[])
+        teams.advance(self.service)
+        self.complete_round(2, remaining_issues=[])
+        teams.advance(self.service)
+        self.assertEqual(self.service.get("parent")["result"]["remaining_issues"], [])
+
+    def test_round_two_prompt_over_executor_limit_is_not_enqueued(self):
+        self.start()
+        self.complete_round(1, checks=["x" * 500000])
+        teams.advance(self.service)
+        with contextlib.closing(self.store.connect()) as database:
+            bundle = teams._bundle(teams.members(database, "parent"))
+        self.assertLessEqual(len(encode(bundle).encode()), teams.MAX_REPORT_BYTES)
+        children = self.children()
+        self.assertEqual([child["round"] for child in children], [1, 1])
+        self.assertTrue(all(child["state"] == "candidate" for child in children))
+        self.assertTrue(all(child["report"]["checks"] == ["x" * 500000] for child in children))
+        parent = self.service.get("parent")
+        self.assertEqual(parent["state"], "failed")
+        self.assertIn("Round-two team prompt", parent["error"])
+        for child in children:
+            self.assertIn(child["child_request_id"], parent["error"])
 
     def test_write_team_and_stale_generation_rejected(self):
         with self.store.transaction() as database:

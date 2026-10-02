@@ -173,10 +173,11 @@ Plan approval still requires independent review and fresh monitor evidence.
 It never supplies required explicit worker approval, including security-audit teams, and only team parents can be accepted.
 Write workers use isolated Git worktrees, never your source checkout.
 Project ownership, dependency correctness, source isolation, credential limits, and no blind retry of unknown outcomes remain mandatory.
-Guarded workers use file tools only and must disclose checks they could not perform.
-`execution.mode = "trusted"` enables native foreground tools and owned worker `run_command` execution for commands and tests without an OS sandbox.
+Workers use file tools, plus owned `run_command` for commands and tests when `commands.enabled = true` or `execution.mode = "trusted"`; without it they must disclose checks they could not perform.
+Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
+`execution.mode = "trusted"` also enables native foreground tools.
 `execution.base_ref` selects the Git branch for worker checkouts, not a directory.
-Plain version: trusted mode lets tools run commands, so only enable it for work you trust.
+Plain version: trusted mode, or turning off the command sandbox, lets tools run commands on your computer, so only enable it for work you trust.
 See [project routing](docs/project-routing.md) for the policy schema, team behavior, and conversational permissions.
 Plain version: change your preferences and make authorized decisions here, then check results before accepting them, without opening more terminals.
 

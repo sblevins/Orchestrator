@@ -289,21 +289,56 @@ def _project_symlink(path, root):
     return target
 
 
-def _snapshot_source(source, destination):
-    """Copy bounded ordinary project files using no-follow directory descriptors.
-
-    Git supplies tracked and non-ignored untracked names; the broker's filters
-    exclude credential and control files. The source index and ref stay untouched.
-    """
-    names = set(
-        _run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], source).split(b"\0")
-    ) - {b""}
-    tracked = set(_run(["ls-files", "-z", "--cached"], destination).split(b"\0")) - {b""}
-    # Clear the owned checkout first so file-to-directory changes also work.
-    for name in sorted(tracked, reverse=True):
+def _changed_paths(path, *base):
+    """Name tracked paths differing from the index or a commit, plus untracked files."""
+    changed = _run(
+        [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            *base,
+            "--",
+        ],
+        path,
+    )
+    untracked = _run(["ls-files", "-z", "--others", "--exclude-standard"], path)
+    names = (set(changed.split(b"\0")) | set(untracked.split(b"\0"))) - {b""}
+    for name in names:
         relative = Path(os.fsdecode(name))
         if relative.is_absolute() or ".." in relative.parts or ".git" in relative.parts:
-            raise WorkspaceError("unsafe snapshot file path")
+            raise WorkspaceError("unsafe workspace file path")
+    return names, {Path(os.fsdecode(name)) for name in untracked.split(b"\0") if name}
+
+
+def _snapshot_source(source, destination, base):
+    """Copy bounded changed project files using no-follow directory descriptors.
+
+    Unchanged tracked files stay as checked out from the base commit. Git supplies
+    changed and non-ignored untracked names; the broker's filters exclude credential
+    and control files. The source index and ref stay untouched.
+    """
+    names, untracked = _changed_paths(source, base)
+    links = _gitlinks(source)
+    if links != _gitlinks(destination):
+        raise WorkspaceError(
+            "Changed submodule commits cannot be snapshotted; commit the parent submodule changes first"
+        )
+    for name, commit in links.items():
+        if (source / os.fsdecode(name)).is_dir():
+            _check_submodule(source, Path(os.fsdecode(name)), commit, snapshot=True)
+    paths = sorted(
+        Path(os.fsdecode(name))
+        for name in names
+        if name not in links
+        and not any(
+            forbidden(part, write=True, trusted=True) for part in Path(os.fsdecode(name)).parts
+        )
+    )
+    # Clear changed entries first so file-to-directory changes and deletions also work.
+    for relative in reversed(paths):
         target = _plain_path(destination / relative.parent) / relative.name
         if target.is_symlink() or target.is_file():
             target.unlink()
@@ -314,27 +349,15 @@ def _snapshot_source(source, destination):
                 except OSError:
                     break
                 directory = directory.parent
-    links = _gitlinks(source)
-    destination_links = _gitlinks(destination)
-    if links != destination_links:
-        raise WorkspaceError(
-            "Changed submodule commits cannot be snapshotted; commit the parent submodule changes first"
-        )
     total_bytes = 0
-    for name in sorted(names):
-        relative = Path(os.fsdecode(name))
-        if relative.is_absolute() or ".." in relative.parts or ".git" in relative.parts:
-            raise WorkspaceError("unsafe snapshot file path")
+    for relative in paths:
         target = _plain_path(destination / relative)
-        if any(forbidden(part, write=True, trusted=True) for part in relative.parts):
-            continue
         source_file = _plain_path(source / relative.parent) / relative.name
         if source_file.is_symlink():
             link = _project_symlink(source_file, source)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(link)
             continue
-        _plain_path(source_file)
         try:
             directory = plain_directory(source / relative.parent)
             try:
@@ -348,10 +371,8 @@ def _snapshot_source(source, destination):
         except OSError as error:
             raise WorkspaceError("snapshot contains an unsafe path or symlink") from error
         metadata = os.fstat(descriptor)
-        if stat.S_ISDIR(metadata.st_mode) and name in tracked:
+        if stat.S_ISDIR(metadata.st_mode) and relative not in untracked:
             os.close(descriptor)
-            if name in links:
-                _check_submodule(source, relative, links[name], snapshot=True)
             # Ordinary tracked files replaced by directories are copied through
             # their separately enumerated children, not as directory entries.
             continue
@@ -440,10 +461,11 @@ def prepare_workspace(
     for commit in commits:
         _git(source, "verify-commit", commit)
     # Checkout itself can invoke smudge filters, so check before worktree add.
-    configuration = _git(source, "config", "--list", "--name-only")
+    configuration = _git(source, "config", "--list", "--name-only", "--show-scope")
     if any(
-        name.startswith("filter.") or (name.startswith("merge.") and name.endswith(".driver"))
-        for name in configuration.splitlines()
+        scope not in ("global", "system")
+        and (name.startswith("filter.") or (name.startswith("merge.") and name.endswith(".driver")))
+        for scope, _, name in (line.partition("\t") for line in configuration.splitlines())
     ):
         raise WorkspaceError(
             "workspace repositories with Git filters or merge drivers are unsupported"
@@ -482,7 +504,7 @@ def prepare_workspace(
     branch = "orchestrator/worker-" + request_id
     _git(source, "worktree", "add", "-b", branch, str(path), base)
     if snapshot_source:
-        _snapshot_source(source, path)
+        _snapshot_source(source, path, base)
         _git(path, "add", "--all", "--", ".")
         _git(path, "commit", "--allow-empty", "-S", "-m", "Worker source snapshot " + request_id)
     for commit in commits:
@@ -545,14 +567,15 @@ def capture_workspace(workspace):
         and _git(path, "symbolic-ref", "--short", "HEAD") != workspace["branch"]
     ):
         raise WorkspaceError("worker changed workspace branch")
-    # Bound all additions, including untracked files, before staging anything.
-    names = _run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], path)
+    # Bound all unstaged changes, including untracked files, before staging anything.
+    names, _ = _changed_paths(path)
     links = _gitlinks(path) if workspace.get("trusted", False) else {}
+    for name, commit in links.items():
+        if (path / os.fsdecode(name)).is_dir():
+            _check_submodule(path, Path(os.fsdecode(name)), commit)
     total_bytes = 0
-    for name in set(names.split(b"\0")) - {b""}:
+    for name in names:
         relative = Path(os.fsdecode(name))
-        if relative.is_absolute() or ".." in relative.parts or ".git" in relative.parts:
-            raise WorkspaceError("unsafe workspace file path")
         candidate = _plain_path(path / relative.parent) / relative.name
         if candidate.is_symlink() and workspace.get("trusted", False):
             _project_symlink(candidate, path)
@@ -561,7 +584,6 @@ def capture_workspace(workspace):
         if candidate.exists():
             metadata = candidate.stat()
             if stat.S_ISDIR(metadata.st_mode) and name in links:
-                _check_submodule(path, relative, links[name])
                 continue
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
                 raise WorkspaceError("only ordinary non-linked files are supported")

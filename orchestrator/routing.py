@@ -39,6 +39,8 @@ _EXECUTOR_EFFORTS = {
     "claude": {"low", "medium", "high", "xhigh", "max"},
 }
 _MAX_POLICY_BYTES = 1024 * 1024
+_PROFILE_KEYS = ("harness", "model", "provider", "effort", "floor")
+_CONFIRMATIONS = {"user", "captain"}
 _DEFAULT_DIFFICULTY_LEVELS = {
     "easy": {"claude": "low", "pi": "low"},
     "hard": {"claude": "high", "pi": "high"},
@@ -54,11 +56,14 @@ def _difficulty(value, context):
     return normalized
 
 
-def _effort(profile, choice, policy):
+def _effort(profile, choice, policy, fallback_difficulty=None):
     if "effort" in choice and "difficulty" in choice:
         raise RoutingError("choice.effort and choice.difficulty are alternatives; supply only one")
-    if "difficulty" in choice:
-        difficulty = _difficulty(choice["difficulty"], "choice.difficulty")
+    difficulty = choice.get("difficulty")
+    if difficulty is None and "effort" not in choice and "effort" not in profile:
+        difficulty = fallback_difficulty
+    if difficulty is not None:
+        difficulty = _difficulty(difficulty, "choice.difficulty")
         harness = profile["harness"]
         return (
             policy.get("difficulty_levels", {})
@@ -72,11 +77,13 @@ def _effort(profile, choice, policy):
 def _classification_profiles(value, context):
     if not isinstance(value, dict):
         raise RoutingError(f"{context} must be a profile or an object containing team")
+    if "approval" in value and value["approval"] not in _CONFIRMATIONS:
+        raise RoutingError(
+            f"{context}.approval must be user or captain (explicit worker confirmation)"
+        )
     if "team" in value:
         if set(value) - {"team", "approval", "description"}:
             raise RoutingError(f"{context} supports team, approval and description")
-        if "approval" in value and value["approval"] not in {"user", "captain"}:
-            raise RoutingError(f"{context}.approval must be user (explicit team confirmation)")
         if "description" in value:
             _text(value["description"], f"{context}.description")
         profiles = value["team"]
@@ -84,7 +91,7 @@ def _classification_profiles(value, context):
             raise RoutingError(f"{context}.team must contain 2 to 8 distinct profiles")
         context += ".team"
     else:
-        profiles = [value]
+        profiles = [{key: item for key, item in value.items() if key != "approval"}]
     seen = set()
     for index, profile in enumerate(profiles):
         location = f"{context}[{index}]"
@@ -150,6 +157,13 @@ def _profiles(value, context):
             raise RoutingError(f"{location} must be a profile object")
         if "team" in profile:
             raise RoutingError(f"{location}.team is only supported in classifications")
+        unknown = sorted(set(profile) - set(_PROFILE_KEYS))
+        if unknown:
+            raise RoutingError(
+                f"{location} has unsupported keys {unknown}; a profile supports only "
+                f"{', '.join(_PROFILE_KEYS)}. Put approval on the rule or classification, "
+                "and correct misspelled keys so no requirement is silently ignored"
+            )
         _identifier(profile.get("harness"), f"{location}.harness")
         if "model" in profile:
             _identifier(profile["model"], f"{location}.model")
@@ -380,12 +394,16 @@ def capture_quota_evidence() -> dict:
     }
 
 
-def resolve_selection(policy, choice, *, evidence=None, operator_override=False) -> dict:
+def resolve_selection(
+    policy, choice, *, evidence=None, operator_override=False, fallback_difficulty=None
+) -> dict:
     """Validate a caller's best-fit decision, without choosing a rule for them.
 
     `evidence` is reserved for program-captured quota adapters. Caller-supplied
     metrics cannot currently unblock quota gates. Operator overrides bypass
     policy matching, but never executor validation or operator approval.
+    A choice's difficulty or effort overrides configured effort; the program's
+    `fallback_difficulty` only fills profiles that configure no effort.
     """
     if not isinstance(choice, dict):
         raise RoutingError("Selection must be an object")
@@ -415,7 +433,7 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
     else:
         policy = validate_policy(policy)
         if "classification" in choice:
-            return _resolve_classification(policy, choice)
+            return _resolve_classification(policy, choice, fallback_difficulty)
         rule_index = choice.get("rule")
         if rule_index == "default":
             if "default" not in policy:
@@ -451,7 +469,7 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
                     "or change this project policy through setup_project"
                 )
         profile["model"] = configured.get("model", choice.get("model"))
-        profile["effort"] = _effort(configured, choice, policy)
+        profile["effort"] = _effort(configured, choice, policy, fallback_difficulty)
         if "provider" in configured:
             profile["provider"] = configured["provider"]
         if "min_confidence" in rule and (
@@ -493,7 +511,7 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
     }
 
 
-def _resolve_classification(policy, choice):
+def _resolve_classification(policy, choice, fallback_difficulty):
     classification = choice["classification"]
     _text(classification, "choice.classification")
     if classification not in policy.get("classifications", {}):
@@ -515,11 +533,13 @@ def _resolve_classification(policy, choice):
             {"default": profile, "difficulty_levels": policy.get("difficulty_levels", {})},
             {key: value for key, value in choice.items() if key != "classification"}
             | {"rule": "default"},
+            fallback_difficulty=fallback_difficulty,
         )
         selection.update(classification=classification, rule=classification, candidate=None)
         resolved.append(selection)
+    requires_approval = configured.get("approval") in _CONFIRMATIONS
     if "team" not in configured:
-        return resolved[0]
+        return resolved[0] | {"requires_approval": requires_approval}
     return {
         "team": resolved,
         "classification": classification,
@@ -532,7 +552,7 @@ def _resolve_classification(policy, choice):
         "rule": classification,
         "candidate": None,
         "rationale": choice["rationale"],
-        "requires_approval": configured.get("approval") in {"user", "captain"},
+        "requires_approval": requires_approval,
         "team_description": configured.get("description", ""),
         "evidence": capture_quota_evidence(),
         "uncertainty": ["Quota availability and model catalog support have not been verified"],

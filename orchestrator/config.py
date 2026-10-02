@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import tomllib
+import unicodedata
 from copy import deepcopy
 from pathlib import Path
 
@@ -32,6 +33,16 @@ MEMORY = re.compile(r"([1-9][0-9]{0,6})([MG])\Z")
 
 def _fail(message):
     raise ConfigurationError(message)
+
+
+def image_model_identifier(model) -> bool:
+    """Accept one exact image-model identifier, in settings and image requests alike."""
+    if not isinstance(model, str) or not 0 < len(model) <= 256 or model.startswith("-"):
+        return False
+    return not any(
+        character.isspace() or unicodedata.category(character) in ("Cc", "Cf", "Cs")
+        for character in model
+    )
 
 
 def _table(parent, key, context="config"):
@@ -129,11 +140,11 @@ def validate_config(config: dict) -> None:
             _fail(
                 "images requires enabled, model, size, quality and output_format; credentials belong in OPENAI_API_KEY, not project settings"
             )
-        _text(images.get("model"), "images.model")
-        if images["model"].startswith("-") or any(
-            character.isspace() or ord(character) < 32 for character in images["model"]
-        ):
-            _fail("images.model must be one exact image-model identifier")
+        if not image_model_identifier(images.get("model")):
+            _fail(
+                "images.model must be one exact image-model identifier of at most 256 "
+                "characters, without a leading hyphen, whitespace or control characters"
+            )
         for field, choices in {
             "size": {"auto", "1024x1024", "1536x1024", "1024x1536"},
             "quality": {"auto", "low", "medium", "high"},
@@ -219,6 +230,12 @@ def validate_config(config: dict) -> None:
     if "monitoring" in config:
         monitoring = _table(config, "monitoring")
         _number(monitoring.get("quiet_seconds", 20), "monitoring.quiet_seconds", 0, 600)
+        _number(
+            monitoring.get("foreground_stale_seconds", 900),
+            "monitoring.foreground_stale_seconds",
+            60,
+            86400,
+        )
         if type(monitoring.get("review_every_prompt")) is not bool:
             _fail("monitoring.review_every_prompt must be a boolean")
         routine = monitoring.get("routine_prompts")
@@ -330,6 +347,24 @@ def _private_path(home, relative):
 
 def load_config(home: Path, project_id: str | None = None) -> dict:
     """Merge tracked defaults, home/config/local.toml, then a project override."""
+    config = unvalidated_config(home, project_id)
+    try:
+        validate_config(config)
+    except RuntimeError as error:
+        raise ConfigurationError(f"cannot validate configuration: {error}") from error
+    return config
+
+
+def repairable_config(home: Path, project_id: str | None = None) -> dict | None:
+    """Return validated settings, or None while a project's settings await repair."""
+    try:
+        return load_config(home, project_id)
+    except ConfigurationError:
+        return None
+
+
+def unvalidated_config(home, project_id=None, project_override=None) -> dict:
+    """Merge configuration layers, optionally replacing the saved project JSON override."""
     try:
         home = Path(home).resolve()
         if project_id is not None and (
@@ -344,9 +379,9 @@ def load_config(home: Path, project_id: str | None = None) -> dict:
         if project_id is not None:
             project_path = _private_path(home, f"config/projects/{project_id}.toml")
             config = _merge(config, _read(project_path, optional=True))
-            override, _ = read_project_override(home, project_id)
-            config = _merge(config, override)
-        validate_config(config)
+            if project_override is None:
+                project_override, _ = read_project_override(home, project_id)
+            config = _merge(config, project_override)
         return config
     except (OSError, RuntimeError) as error:
         raise ConfigurationError(f"cannot resolve configuration path: {error}") from error

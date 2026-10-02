@@ -74,8 +74,24 @@ def finish_turn(store, session_id: str, turn_id: str | None = None) -> dict:
         )
 
 
-def should_review(database, project_id: str, quiet_seconds: float = 20) -> bool:
-    """Use the current writer only, within the caller's scheduling transaction."""
+def touch_turn(store, session_id: str) -> dict | None:
+    """Record real activity in an unfinished foreground turn."""
+    with store.transaction() as database:
+        _writer(database, session_id)
+        marker = _marker(database, session_id)
+        if not marker or not marker["active"]:
+            return marker
+        return _save(database, session_id, {**marker, "touched": time.time()})
+
+
+def should_review(
+    database, project_id: str, quiet_seconds: float = 20, stale_seconds: float | None = None
+) -> bool:
+    """Use the current writer only, within the caller's scheduling transaction.
+
+    With stale_seconds, an unfinished turn without activity for that long permits silent
+    background scheduling. Interrupting delivery omits it and waits for completion or death.
+    """
     writer = database.execute(
         "SELECT id FROM sessions WHERE project_id=? AND active=1 AND observer=0",
         (project_id,),
@@ -101,7 +117,10 @@ def should_review(database, project_id: str, quiet_seconds: float = 20) -> bool:
                 # A dead frontend cannot be interrupted. Do not rewrite its marker here:
                 # monitor_candidate is a read path, and a new owner may be binding concurrently.
                 return True
-    return not marker["active"] and marker["completed"] <= time.time() - quiet_seconds
+        return stale_seconds is not None and marker["touched"] <= time.time() - max(
+            stale_seconds, quiet_seconds
+        )
+    return marker["completed"] <= time.time() - quiet_seconds
 
 
 def delivery_updates(store, session_id: str, quiet_seconds: float = 20) -> dict:

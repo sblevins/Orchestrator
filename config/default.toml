@@ -83,6 +83,7 @@ prompt_path = "roles/monitor.md"
 [monitoring]
 review_every_prompt = false
 quiet_seconds = 20
+foreground_stale_seconds = 900
 routine_prompts = ["/status", "/tasks", "/progress", "status", "progress", "what's the status", "what is the status", "what's the status of work", "what is the status of work", "how is it going", "show progress", "show the current status", "list running tasks"]
 
 # Project-local overrides are editable through configure_project.

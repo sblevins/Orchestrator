@@ -13,6 +13,59 @@ class ClassificationRoutingTests(unittest.TestCase):
         self.policy = {"classifications": {"coding": self.pi, "review": self.claude}}
         self.choice = {"classification": "coding", "difficulty": "hard", "rationale": "Fits"}
 
+    def test_single_profile_approval_requires_confirmation(self):
+        for approval in ("user", "captain"):
+            with self.subTest(approval=approval):
+                policy = {"classifications": {"audit": {**self.claude, "approval": approval}}}
+                selection = resolve_selection(policy, {**self.choice, "classification": "audit"})
+                self.assertTrue(selection["requires_approval"])
+                self.assertEqual(selection["model"], "opus")
+        self.assertFalse(resolve_selection(self.policy, self.choice)["requires_approval"])
+        with self.assertRaisesRegex(RoutingError, "approval must be user or captain"):
+            validate_policy({"classifications": {"audit": {**self.claude, "approval": "auto"}}})
+
+    def test_unknown_profile_keys_are_rejected_with_guidance(self):
+        team = {"team": [self.claude, {**self.pi, "approval": "user"}]}
+        for policy in (
+            {"classifications": {"audit": {**self.claude, "aproval": "user"}}},
+            {"classifications": {"audit": team}},
+            {"rules": [{"when": "Any", "use": {**self.claude, "efort": "max"}}]},
+            {"default": {**self.claude, "approval": "captain"}},
+        ):
+            with (
+                self.subTest(policy=policy),
+                self.assertRaisesRegex(RoutingError, "unsupported keys .*approval on the rule"),
+            ):
+                validate_policy(policy)
+
+    def test_fallback_difficulty_fills_only_missing_effort_and_choice_overrides(self):
+        pinned = {"harness": "pi", "provider": "openai-codex", "effort": "max-supported"}
+        policy = {
+            "classifications": {
+                "audit": {
+                    "team": [
+                        {**pinned, "model": "Astra"},
+                        {**pinned, "model": "Sol"},
+                        {"harness": "claude", "model": "Opus"},
+                        {"harness": "claude", "model": "Fable", "effort": "xhigh"},
+                    ]
+                }
+            }
+        }
+        choice = {"classification": "audit", "rationale": "Audit"}
+        standing = resolve_selection(policy, choice, fallback_difficulty="hard")
+        self.assertEqual(
+            [peer["effort"] for peer in standing["team"]],
+            ["max-supported", "max-supported", "high", "xhigh"],
+        )
+        self.assertNotIn("difficulty", standing)
+        explicit = resolve_selection(
+            policy, {**choice, "difficulty": "easy"}, fallback_difficulty="hard"
+        )
+        self.assertEqual([peer["effort"] for peer in explicit["team"]], ["low"] * 4)
+        exact = resolve_selection(policy, {**choice, "effort": "high"}, fallback_difficulty="hard")
+        self.assertEqual([peer["effort"] for peer in exact["team"]], ["high"] * 4)
+
     def test_defaults_and_normalization(self):
         for classification, expected_model in (("coding", "gpt-exact-123"), ("review", "opus")):
             for difficulty, effort in (

@@ -5,8 +5,14 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from orchestrator.worker_execution import WorkspaceError, capture_workspace
+from orchestrator.worker_execution import (
+    MAX_FILE_BYTES,
+    WorkspaceError,
+    capture_workspace,
+    prepare_workspace,
+)
 from tests import test_worker_execution as fixtures
 
 git = fixtures.git
@@ -307,3 +313,87 @@ class TrustedWorkspaceTests(unittest.TestCase):
         self.source = nested
         with self.assertRaisesRegex(WorkspaceError, "repository root"):
             self.prepare(trusted=True)
+
+    def commit_files(self, files):
+        for name, content in files.items():
+            (self.source / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.source / name).write_bytes(content)
+        git(self.source, "add", "-f", *files)
+        git(self.source, "commit", "-qm", "Committed project fixtures")
+
+    def test_committed_sensitive_looking_files_are_not_deleted(self):
+        committed = {
+            ".env.example": b"API_URL=https://example.test\n",
+            ".npmrc": b"registry=https://registry.example.test\n",
+            "tests/fixtures/server.pem": b"fixture certificate\n",
+            "tests/fixtures/id_ecdsa": b"fixture key\n",
+            ".orchestrator/crew-dispatch.json": b"{}\n",
+        }
+        self.commit_files(committed)
+        (self.source / "file.txt").write_text("user edit\n")
+        workspace = self.prepare(trusted=True)
+        path = Path(workspace["path"])
+        for name, content in committed.items():
+            self.assertEqual((path / name).read_bytes(), content, name)
+        (path / "worker.txt").write_text("worker result\n")
+        result = capture_workspace(workspace)
+        self.assertEqual(result["changed_files"], ["file.txt", "worker.txt"])
+        self.assertNotIn("deleted file", Path(result["diff_path"]).read_text())
+        for name, content in committed.items():
+            self.assertEqual(git(path, "show", f"HEAD:{name}").encode() + b"\n", content, name)
+
+    def test_new_credentials_are_skipped_and_tracked_versions_kept(self):
+        self.commit_files({".env.example": b"TEMPLATE=1\n", ".gitignore": b"local.secret\n"})
+        (self.source / ".env.example").write_text("TEMPLATE=locally edited secret\n")
+        for name in (".env", ".git-credentials", ".pgpass", "_netrc", "id_ecdsa", "local.secret"):
+            (self.source / name).write_text("private-sentinel\n")
+        (self.source / ".kube").mkdir()
+        (self.source / ".kube/config").write_text("private-sentinel\n")
+        (self.source / "notes.txt").write_text("ordinary new file\n")
+        workspace = self.prepare(trusted=True)
+        path = Path(workspace["path"])
+        self.assertEqual((path / ".env.example").read_text(), "TEMPLATE=1\n")
+        self.assertEqual((path / "notes.txt").read_text(), "ordinary new file\n")
+        result = capture_workspace(workspace)
+        self.assertEqual(result["changed_files"], ["notes.txt"])
+        self.assertNotIn("private-sentinel", Path(result["diff_path"]).read_text())
+        self.assertEqual(
+            (self.source / ".env.example").read_text(), "TEMPLATE=locally edited secret\n"
+        )
+
+    def test_unchanged_large_committed_file_does_not_block_workers(self):
+        large = b"x" * (MAX_FILE_BYTES + 1)
+        self.commit_files({"assets/large.bin": large})
+        (self.source / "file.txt").write_text("user edit\n")
+        for trusted in (True, False):
+            with self.subTest(trusted=trusted):
+                if not trusted:
+                    git(self.source, "checkout", "--", "file.txt")
+                workspace = prepare_workspace(
+                    self.root / "home",
+                    {"id": f"large-{trusted}", "mode": "write"},
+                    self.source,
+                    trusted=trusted,
+                )
+                path = Path(workspace["path"])
+                self.assertEqual((path / "assets/large.bin").stat().st_size, len(large))
+                (path / "worker.txt").write_text("worker result\n")
+                result = capture_workspace(workspace)
+                self.assertNotIn("assets/large.bin", result["changed_files"])
+                self.assertIn("worker.txt", result["changed_files"])
+        (self.source / "new-large.bin").write_bytes(large)
+        with self.assertRaisesRegex(WorkspaceError, "capture limit"):
+            prepare_workspace(
+                self.root / "home", {"id": "large-new", "mode": "write"}, self.source, trusted=True
+            )
+
+    def test_user_wide_git_filters_do_not_block_isolated_workers(self):
+        global_configuration = self.root / "global-gitconfig"
+        global_configuration.write_text(
+            '[filter "lfs"]\n\tclean = git-lfs clean -- %f\n\tsmudge = git-lfs smudge -- %f\n'
+            "\tprocess = git-lfs filter-process\n\trequired = true\n"
+        )
+        with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_configuration)}):
+            workspace = self.prepare(trusted=True)
+            (Path(workspace["path"]) / "worker.txt").write_text("worker result\n")
+            self.assertEqual(capture_workspace(workspace)["changed_files"], ["worker.txt"])

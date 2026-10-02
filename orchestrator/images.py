@@ -17,6 +17,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from .config import image_model_identifier
+
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_RESPONSE_BYTES = 24 * 1024 * 1024
 MAX_STATE_BYTES = 64 * 1024
@@ -104,13 +106,7 @@ def _validate(settings: dict, arguments: dict) -> tuple[str, dict]:
             "Provide a prompt of 1-32000 characters and a valid output path.", "invalid_arguments"
         )
     model = settings.get("model", "gpt-image-2")
-    if (
-        not isinstance(model, str)
-        or not model.strip()
-        or model.startswith("-")
-        or len(model) > 256
-        or any(ord(character) < 33 or ord(character) == 127 for character in model)
-    ):
+    if not image_model_identifier(model):
         raise ImageError("Invalid image model configuration.", "invalid_arguments")
     payload = {
         "model": model,

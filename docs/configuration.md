@@ -33,6 +33,10 @@ The active bound coordinator can call `configure_project` with a partial `settin
 It recursively merges the patch, validates the effective configuration, and writes only private `<home>/config/projects/<bound-id>.json` with mode `0600` in private directories.
 It never modifies global settings, `config/local.toml`, tracked defaults, another project's settings, or the project TOML override.
 On a revision conflict, reread and reconcile rather than overwriting another change.
+A `null` value removes only this project's own override for that setting, restoring the inherited value.
+Unknown setting names are rejected with spelling guidance; shared-only `supervisor.max_parallel` and `supervisor.poll_seconds` are rejected in favor of `execution.max_parallel` and `config/local.toml`.
+If a project's effective settings become invalid, only that project's background work pauses and a notification explains the error.
+Its coordinator can still receive prompts and use the Orchestrator tools to inspect `project_settings` and repair it with `configure_project`, while other tools stay blocked until the repair.
 Settings include roles and effort, personalization, monitoring, planning and named templates, execution, and permissions.
 Arbitrary adapter/frontend executable changes are rejected conversationally because a replacement executable can affect things outside the project and ignore safety flags.
 Existing tasks keep captured role and model settings.
@@ -66,7 +70,8 @@ Plan approval still requires independent review and fresh monitor evidence.
 `execution.unattended = true` supplies standing project authorization for reviewed-plan approval and candidate acceptance only when `remaining_issues` is explicitly empty and live gates pass.
 It never supplies policy-required explicit worker approval, including security-audit teams; only a team's parent request can be accepted.
 Project ownership, dependency correctness, no blind retry of unknown outcomes, isolated source workspaces, and credential limits remain intrinsic boundaries.
-Restricted workers have file tools by default and may enable sandboxed commands; trusted commands are unsandboxed.
+Restricted workers have file tools by default; `commands.enabled = true` adds `run_command`, which is OS-sandboxed unless `commands.sandbox = false`.
+Trusted worker commands are always unsandboxed.
 Plain version: project permission settings do not allow skipping required work, and trusted commands need care because they can act outside the project.
 
 ## Supervisor and personalization
@@ -232,14 +237,17 @@ Plain version: both interfaces share the same workers, but nothing runs until yo
 ## Execution and image generation
 
 `execution.mode` is `restricted` (the default) or `trusted`.
-Restricted mode retains the coordinator's native-tool restrictions and file-only workers unless optional owned tools are enabled.
+Restricted mode retains the coordinator's native-tool restrictions and file-only workers unless optional owned tools such as `commands.enabled` are enabled.
 Trusted mode enables native foreground tools and the owned worker `run_command` tool for build and test commands; these commands are not OS-sandboxed.
 `execution.base_ref` selects a Git branch to resolve and freeze for worker checkout preparation, not a directory.
 It does not automatically merge or push candidate changes.
 Plain version: trusted tools can run commands, and the branch setting chooses the code workers start from.
 
 `commands.enabled` can separately enable the owned command tool without enabling trusted native foreground tools.
-Command settings include sandboxing, network access, and timeouts; trusted execution overrides command sandboxing.
+Command settings include sandboxing, network access, and timeouts.
+`execution.mode` controls native foreground trust and makes worker commands available; `commands.sandbox` independently controls whether explicitly enabled restricted-mode worker commands use the OS sandbox.
+Trusted mode always forces unsandboxed worker commands, and the default restricted command setting stays sandboxed.
+Plain version: trusted mode, or `commands.sandbox = false`, lets worker commands do anything your user account can; otherwise enabled worker commands stay in a sandbox.
 
 Project `images.enabled` defaults to false.
 Explicit image generation uses the separately billed OpenAI Images API with `OPENAI_API_KEY`, not subscription OAuth credentials.
@@ -256,5 +264,10 @@ Combined instructions and unknown messages are reviewed.
 All prompts remain saved regardless of this classification; quiet prompts remain available in later review evidence.
 Prompts saved before project selection are mirrored into that project when the instance binds, with duplicate mirroring prevented by prompt identity.
 The monitor waits for foreground completion and `monitoring.quiet_seconds`, which defaults to 20.
+Claude Code runs no hook when the user interrupts a response, so an interrupted turn never reports completion.
+After `monitoring.foreground_stale_seconds` (900 by default, 60 to 86400) without prompt or tool-use hook activity, an unfinished turn permits silent background monitor scheduling, which also supplies the monitor evidence plan approval needs.
+The tradeoff is that a response running that long without any tool call can be reviewed in the background while it is still running.
+Interrupting delivery never relies on this limit: it still waits for a completed turn or an exited frontend.
+Plain version: if a turn looks abandoned for 15 minutes, background checks start again, but nothing interrupts the user until the turn really ends.
 Only blocking monitor findings interject; informational and warning findings remain silent but inspectable and acknowledgeable.
 Plain version: a simple status question does not need another model call, and routine feedback does not interrupt the conversation.

@@ -22,6 +22,9 @@ import uuid
 from pathlib import Path
 
 OUTPUT_LIMIT = 1024 * 1024
+LOG_HEAD_LIMIT = OUTPUT_LIMIT // 4
+RESULT_OUTPUT_LIMIT = 64 * 1024
+RESULT_HEAD_LIMIT = RESULT_OUTPUT_LIMIT // 4
 BWRAP = "/usr/bin/bwrap"
 
 
@@ -141,6 +144,16 @@ def _save(descriptor: int, name: str, data: bytes) -> None:
         )
     finally:
         os.unlink(temporary, dir_fd=descriptor)
+
+
+def _excerpt(head: bytes, tail: bytes, total: int, head_limit: int, limit: int) -> bytes:
+    """Keep the start and end of output, marking exactly how many bytes were omitted."""
+    retained = bytes(head + tail)
+    if total <= limit:
+        return retained
+    ending = retained[-(limit - head_limit) :]
+    marker = f"\n[... {total - head_limit - len(ending)} output bytes omitted ...]\n".encode()
+    return retained[:head_limit] + marker + ending
 
 
 def _tools(options: dict) -> dict[str, Path]:
@@ -321,9 +334,10 @@ def run_command(options: dict, arguments: dict) -> dict:
     argv, environment, timeout, artifacts = _prepare(options, arguments)
     sandboxed = options.get("sandbox", True)
     artifact_descriptor = _artifact_fd(artifacts)
-    output = bytearray()
+    head = bytearray()
+    tail = bytearray()
+    total_bytes = 0
     timed_out = False
-    output_limited = False
     exit_code = None
     error = None
     process = None
@@ -403,14 +417,12 @@ def run_command(options: dict, arguments: dict) -> dict:
                         if not chunk:
                             selector.unregister(key.fileobj)
                             continue
-                        available = OUTPUT_LIMIT - len(output)
-                        output.extend(chunk[:available])
-                        if len(chunk) > available:
-                            output_limited = True
-                            break
-                    if output_limited:
-                        break
-            if not timed_out and not output_limited:
+                        total_bytes += len(chunk)
+                        head_room = max(0, LOG_HEAD_LIMIT - len(head))
+                        head.extend(chunk[:head_room])
+                        tail.extend(chunk[head_room:])
+                        del tail[: max(0, len(tail) - (OUTPUT_LIMIT - LOG_HEAD_LIMIT))]
+            if not timed_out:
                 try:
                     process.wait(timeout=max(0.001, deadline - time.monotonic()))
                 except subprocess.TimeoutExpired:
@@ -437,6 +449,10 @@ def run_command(options: dict, arguments: dict) -> dict:
                 process.wait()
                 process.stdout.close()
                 exit_code = process.returncode
+        log = _excerpt(head, tail, total_bytes, LOG_HEAD_LIMIT, OUTPUT_LIMIT)
+        output = _excerpt(head, tail, total_bytes, RESULT_HEAD_LIMIT, RESULT_OUTPUT_LIMIT).decode(
+            "utf-8", "replace"
+        )
         identifier = uuid.uuid4().hex
         log_name = f"{identifier}.log"
         metadata_name = f"{identifier}.json"
@@ -444,15 +460,17 @@ def run_command(options: dict, arguments: dict) -> dict:
             "sandboxed": sandboxed,
             "exit_code": exit_code,
             "timed_out": timed_out,
-            "output_limited": output_limited,
-            "output": output.decode("utf-8", "replace"),
+            "output_bytes": total_bytes,
+            "output_truncated": total_bytes > RESULT_OUTPUT_LIMIT,
+            "log_truncated": total_bytes > OUTPUT_LIMIT,
+            "output": output,
             "log_path": str(artifacts / log_name),
             "metadata_path": str(artifacts / metadata_name),
             "verification": "program-captured",
         }
         if error:
             result["error"] = error
-        _save(artifact_descriptor, log_name, bytes(output))
+        _save(artifact_descriptor, log_name, log)
         _save(
             artifact_descriptor,
             metadata_name,

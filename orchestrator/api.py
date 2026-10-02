@@ -8,7 +8,7 @@ import json
 import uuid
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config, repairable_config
 from .intake import needs_review
 from .store import NOTE_NAMES, StateError, Store, atomic_write, encode, now
 
@@ -129,7 +129,7 @@ def record_prompt(store: Store, session_id: str, prompt: str) -> dict:
     document = {"id": prompt_id, "session_id": session_id, "prompt": prompt, "created": now()}
     path = store.data / "sessions" / session_id / "prompts" / f"{prompt_id}.json"
     atomic_write(path, encode(document))
-    config = load_config(store.home, session["project_id"])
+    config = repairable_config(store.home, session["project_id"])
     important = needs_review(prompt, config)
     result = {"prompt_id": prompt_id, "review_required": important, "path": str(path)}
     if session["project_id"] and session["active"] and not session["observer"]:
@@ -155,7 +155,7 @@ def _mirror_prompt(store, session_id, document, path, config):
 
 
 def _mirror_saved_prompts(store, session_id, project_id):
-    config = load_config(store.home, project_id)
+    config = repairable_config(store.home, project_id)
     directory = store.data / "sessions" / session_id / "prompts"
     saved = [(path, json.loads(path.read_text())) for path in directory.glob("*.json")]
     for path, document in sorted(saved, key=lambda item: (item[1]["created"], item[1]["id"])):
@@ -234,7 +234,7 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
     if action == "delivery_updates":
         from .monitoring import delivery_updates
 
-        config = load_config(home, session["project_id"])
+        config = repairable_config(home, session["project_id"]) or {}
         return delivery_updates(
             store, session_id, config.get("monitoring", {}).get("quiet_seconds", 20)
         )

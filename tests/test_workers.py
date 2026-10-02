@@ -473,6 +473,68 @@ class WorkerTests(unittest.TestCase):
         self.workers.dispatch_ready()
         self.assertIsNotNone(self.workers.get(request["id"])["task_id"])
 
+    def standing_selection(self, policy):
+        from orchestrator.config import load_config
+        from orchestrator.project_settings import configure_project
+
+        configuration = patch("orchestrator.workers.load_config", side_effect=load_config)
+        configuration.start()
+        self.addCleanup(configuration.stop)
+        configure_project(
+            self.store, "session", {"execution": {"unattended": True, "worker_difficulty": "hard"}}
+        )
+        self.policy_path.write_text(encode(policy))
+        self.plan()
+        request = next(item for item in self.workers.list("project") if item["node_id"] == "a")
+        task, report = self.monitor(
+            selections=[
+                {
+                    "request_id": request["id"],
+                    "choice": {"classification": "audit", "rationale": "Audit source"},
+                }
+            ]
+        )
+        self.apply(task, report)
+        selected = self.workers.get(request["id"])
+        self.assertEqual(selected["selection_source"], "standing:" + task["id"])
+        return selected
+
+    def test_standing_fallback_difficulty_fills_only_missing_team_effort(self):
+        pinned = {"harness": "pi", "provider": "openai-codex", "effort": "max-supported"}
+        selected = self.standing_selection(
+            {
+                "classifications": {
+                    "audit": {
+                        "team": [
+                            {**pinned, "model": "Astra"},
+                            {**pinned, "model": "Sol"},
+                            {"harness": "claude", "model": "Opus"},
+                            {"harness": "claude", "model": "Fable"},
+                        ]
+                    }
+                }
+            }
+        )
+        self.assertEqual(
+            [peer["effort"] for peer in selected["profile"]["team"]],
+            ["max-supported", "max-supported", "high", "high"],
+        )
+
+    def test_standing_single_profile_confirmation_is_not_auto_dispatched(self):
+        from orchestrator.autonomy import advance
+
+        selected = self.standing_selection(
+            {"classifications": {"audit": {**PROFILE, "approval": "user"}}}
+        )
+        self.assertTrue(selected["profile"]["requires_approval"])
+        advance(self.store)
+        self.workers.dispatch_ready()
+        self.assertIsNone(self.workers.get(selected["id"])["task_id"])
+        self.assertIsNone(self.workers.get(selected["id"])["approval"])
+        self.workers.approve(selected["id"], "User confirmed the audit")
+        self.workers.dispatch_ready()
+        self.assertIsNotNone(self.workers.get(selected["id"])["task_id"])
+
     def test_captain_rule_requires_extra_approval(self):
         self.policy_path.write_text(
             encode({"rules": [{"when": "Any work", "use": PROFILE, "approval": "captain"}]})

@@ -19,8 +19,8 @@ Routing supports classifications, caller-selected difficulty or effort, and lega
 The bound coordinator selects both planned and on-demand workers.
 Monitor classification suggestions remain recommendations unless unattended authorization permits selection with configured profile effort or `execution.worker_difficulty`.
 
-`execution.mode` distinguishes guarded coordination from trusted native foreground tools and owned worker `run_command` execution.
-Trusted commands are unsandboxed and can run checks; isolated worker worktrees are not operating-system security boundaries.
+`execution.mode` distinguishes guarded coordination from trusted native foreground tools and makes owned worker `run_command` available; `commands.enabled` can add it in restricted mode.
+Trusted commands are unsandboxed, restricted commands are OS-sandboxed unless `commands.sandbox = false`, and isolated worker worktrees are not operating-system security boundaries.
 `execution.base_ref` selects the Git branch used to prepare worker checkouts.
 Trusted `HEAD` work snapshots unfinished source files without committing or changing the source checkout.
 Internal instruction links and registered submodule initialization work in trusted checkouts.

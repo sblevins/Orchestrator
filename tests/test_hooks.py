@@ -23,6 +23,10 @@ class HookTests(unittest.TestCase):
         )
         self.environment.start()
         self.addCleanup(self.environment.stop)
+        for target in ("orchestrator.hooks.claude_parent", "orchestrator.bootstrap.claude_parent"):
+            parent = patch(target, return_value=None)
+            parent.start()
+            self.addCleanup(parent.stop)
 
     def hook(self, event, **values):
         return handle_hook(self.home, event, {"session_id": "frontend", **values})

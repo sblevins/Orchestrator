@@ -71,7 +71,7 @@ For routine project approvals, use the conversational APIs rather than requiring
 
 ## Workspaces, results, and acceptance
 
-Guarded read workers use file-reading tools; team peers also have owned messaging tools.
+Read workers use file-reading tools; team peers also have owned messaging tools.
 `execution.base_ref` selects the Git branch used as the worker checkout baseline.
 Accepted dependency commits are supplied through an isolated checkout when needed, and comparison teams freeze the same Git commit and accepted inputs across two rounds.
 Write workers receive a separate worktree and branch created by the supervisor, never permission to edit the source checkout.
@@ -80,10 +80,13 @@ That exception includes untracked files and tracked or staged additions, modific
 Other untracked files, real source changes, and unsafe policy paths still block isolated snapshots.
 No stash, commit, ignore rule, or Git exclude write is needed to preserve routing-only edits.
 Accepted prerequisite commits can be merged into the isolated worker checkout; this never integrates a candidate into the source branch.
-Unsupported Git filters, merge drivers, unsafe paths, or provenance changes block preparation or capture.
+Repository Git filters or merge drivers, unsafe paths, or provenance changes block preparation or capture; user-wide filters such as Git LFS do not.
 
-Guarded workers have reading and permitted file-edit tools only.
-Trusted mode adds owned `run_command` for commands and tests without an OS sandbox; file-tool restrictions do not contain those commands.
+Workers have reading and permitted file-edit tools, plus owned `run_command` when `commands.enabled = true` or `execution.mode = "trusted"`.
+Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
+File-tool restrictions do not contain unsandboxed commands.
+Commands run until they exit or reach their timeout, however much they print.
+The result keeps the start and end of the output, the total byte count, and truncation flags, and the saved log keeps a larger start and end.
 The supervisor prepares Git worktrees and captures bounded diffs and signed local candidate commits.
 Signing and signature verification must already be configured; the supervisor never changes identity or disables signing.
 These controls are not an operating-system sandbox against hostile programs running as the same user.
@@ -104,9 +107,10 @@ Plain version: check the result before accepting it, and only then let later job
 
 ## Existing source edits and project setup
 
-Trusted workers starting from `HEAD` receive a signed isolated snapshot of ordinary tracked and untracked project files, including an unborn Git repository.
+Trusted workers starting from `HEAD` receive a signed isolated snapshot, including for an unborn Git repository.
+The owned checkout starts from `HEAD` and copies only changed tracked files and non-ignored untracked files, so unchanged large committed files never count against capture limits.
 The source files, index, and checked-out branch remain unchanged.
-Credential and orchestration control files are excluded from the copied snapshot; existing committed history is not scrubbed.
+New or changed credential and orchestration control files are not copied, while committed versions, including fixtures with credential-like names, stay exactly as committed; existing history is not scrubbed.
 An explicit `execution.base_ref` or frozen team baseline uses that committed ref instead, recording that unrelated source edits were excluded.
 Plain version: you do not need to commit unfinished work merely to start a trusted worker, and choosing another branch does not silently mix in edits from the current one.
 

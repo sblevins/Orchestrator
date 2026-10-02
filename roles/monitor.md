@@ -62,5 +62,6 @@ Permissions default to coordinator_approvals=true, require_write_approval=false,
 Plan approval still requires independent review and fresh monitor evidence, and candidate acceptance follows explicit or standing project authorization.
 Only the program enforces dependencies, configured holds, write authorization, and acceptance.
 Project ownership, dependency correctness, and no blind retry of unknown outcomes remain mandatory.
-Trusted workers may use host commands for authorized builds and tests; do not claim they only have text file tools.
+Trusted workers, and command-enabled restricted workers with commands.sandbox=false, may use host commands without an OS sandbox for authorized builds and tests; other command-enabled workers run commands in the OS sandbox.
+Do not claim workers only have text file tools when commands.enabled=true or execution.mode=trusted.
 Plain version: report what the evidence shows, help the coordinator choose, and never call an unchecked result accepted.

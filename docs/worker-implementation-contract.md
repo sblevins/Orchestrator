@@ -26,8 +26,9 @@ Legacy quota-dependent arrays require trusted evidence and are not comparison te
 Classification difficulty mappings and supported profile schemas are documented in [project routing](project-routing.md#classifications-and-difficulty).
 
 Read workers are read-only; write workers edit only isolated Git worktrees, never the source checkout.
-Guarded workers expose controlled file tools; trusted workers additionally expose owned `run_command` for unsandboxed command and test execution.
-File-tool path containment does not constrain arbitrary trusted commands.
+Workers expose controlled file tools; trusted workers and command-enabled restricted workers additionally expose owned `run_command` for command and test execution.
+Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
+File-tool path containment does not constrain unsandboxed commands.
 These controls are not an operating-system sandbox against hostile same-user processes.
 There is no automatic merge or push.
 Permissions default to conversational coordinator approvals enabled, general write approval not required, and monitor holds enforced; these are project-local configurable preferences.

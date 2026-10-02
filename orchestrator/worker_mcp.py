@@ -34,11 +34,18 @@ def check_worker(context):
         return WorkerService(store).task_check(database, current, active=True)
 
 
-def tool_definitions(names):
+def tool_definitions(names, commands=None):
+    sandboxed = (commands or {}).get("sandbox", True)
     definitions = team_definitions() + [
         {
             "name": "run_command",
-            "description": "Run a bounded command under host-captured policy.",
+            "description": "Run a bounded command under host-captured policy "
+            + (
+                "inside the OS sandbox."
+                if sandboxed
+                else "on the host without an OS sandbox; file-tool path limits do not apply, "
+                "so stay within the authorized project scope."
+            ),
             "inputSchema": {
                 "type": "object",
                 "additionalProperties": False,
@@ -102,7 +109,11 @@ class WorkerMCPServer(TeamMCPServer):
         try:
             if message["method"] == "tools/list":
                 check_worker(self.options["worker_context"])
-                response["result"] = {"tools": tool_definitions(self.options["tool_names"])}
+                response["result"] = {
+                    "tools": tool_definitions(
+                        self.options["tool_names"], self.options.get("commands")
+                    )
+                }
             else:
                 value = execute(self.options, params["name"], params.get("arguments", {}))
                 response["result"] = {
