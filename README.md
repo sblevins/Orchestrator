@@ -118,6 +118,20 @@ Project `images.enabled` defaults to false, and supported outputs are PNG and JP
 Plain version: settle important questions before paying for planning, keep routine feedback quiet, and enable images separately if you want to pay for them.
 These integrations are undergoing offline validation; see [current status](docs/status.md) for validation and deployment limits.
 
+## View a saved plan
+
+When presenting a saved validated plan, the coordinator calls `export_plan` with `{"plan_id":"<plan-id>"}` through Claude MCP or the Pi `orchestrator` action and links the returned `html_uri`.
+The shared renderer makes a standardized offline HTML page with an accessible SVG graph, standard Mermaid source, and a JSON snapshot; agents do not write page code or need shell access.
+Private bundles live under `data/projects/<project>/plan-exports/<plan>/<export>/` and contain `index.html`, `plan.mmd`, and `snapshot.json`.
+Export again after material plan, status, or routing changes; the page is static and cannot edit, approve, or dispatch work.
+Wave grouping shows dependency depth, not promised simultaneous execution, and worker labels use saved selections rather than guesses from current routing.
+Exporting does not publish the plan; warn before public or off-machine sharing of private, untrusted plan or report text.
+Plain version: the tool makes a page you can open offline, but it does not update itself or start work.
+
+The CLI provides `bin/orchestrator plan-view PLAN_ID [--open]` and `bin/orchestrator graph PLAN_ID --format mermaid`.
+Export does not launch a browser unless `--open` is requested; graph output defaults to JSON as before.
+See [plan presentation](docs/workflows.md#present-a-saved-plan) for permissions, metadata, and bundle details.
+
 ## Included now
 
 - Four planning roles, with only orchestrator and monitor remaining ongoing roles.

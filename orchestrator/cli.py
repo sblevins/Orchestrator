@@ -134,6 +134,10 @@ def parser() -> argparse.ArgumentParser:
     hold.add_argument("--reason", required=True)
     graph = commands.add_parser("graph")
     graph.add_argument("plan_id")
+    graph.add_argument("--format", choices=("json", "mermaid"), default="json")
+    view = commands.add_parser("plan-view", help="Export a standard offline plan page and Mermaid")
+    view.add_argument("plan_id")
+    view.add_argument("--open", action="store_true", help="Also open the HTML in your browser")
     return root
 
 
@@ -560,13 +564,28 @@ def main(argv=None) -> int:
             elif command == "resolve-hold":
                 store.resolve_hold(arguments.hold_id, arguments.reason)
                 emit({"resolved": arguments.hold_id})
+            elif command == "plan-view":
+                from .plan_exports import export_plan
+
+                result = export_plan(store, arguments.plan_id)
+                if arguments.open:
+                    import webbrowser
+
+                    result["browser_opened"] = webbrowser.open(result["html_uri"])
+                emit(result)
             elif command == "graph":
-                plan = store.plan(arguments.plan_id)
-                emit(
-                    store.graph_snapshot(
-                        arguments.plan_id, load_config(home, plan["project_id"])["execution"]
+                if arguments.format == "mermaid":
+                    from .plan_exports import plan_snapshot
+                    from .plan_rendering import mermaid_diagram
+
+                    print(mermaid_diagram(plan_snapshot(store, arguments.plan_id)), end="")
+                else:
+                    plan = store.plan(arguments.plan_id)
+                    emit(
+                        store.graph_snapshot(
+                            arguments.plan_id, load_config(home, plan["project_id"])["execution"]
+                        )
                     )
-                )
         return 0
     except (ValueError, OSError, RuntimeError) as error:
         emit({"error": str(error)})

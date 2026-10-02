@@ -13,6 +13,10 @@ Return the plan for separate critic review and revise it when evidence warrants 
 Use a directed acyclic graph (DAG) by default, with explicit dependencies rather than an ordered prose checklist.
 Plain version: name each task and list which tasks must finish successfully before it may start.
 The program must validate the graph and enforce its dependencies; do not rely on a role remembering task order.
+Emit only the structured graph below, never Mermaid, HTML, CSS, or a generated plan page.
+After saving and validating the plan, the coordinator uses `export_plan` and links its returned `html_uri`; the shared renderer owns presentation.
+Dependency-depth waves in that page do not promise parallel launches or grant approval.
+Plain version: describe the tasks and their requirements; software makes the page.
 Use unique node identifiers, reference only existing nodes, and never create self-dependencies or cycles.
 Represent independent tasks without unnecessary dependency edges.
 Respect the selected workflow and configured review-round limit; do not declare unreviewed work approved when the limit is reached.
@@ -38,6 +42,28 @@ Return exactly one JSON object, without Markdown fences or text outside the obje
 ```
 
 Include every listed field, use empty lists when appropriate, and put any needed plain-English explanation inside string fields.
+Optional presentation fields may be added to any node:
+
+```json
+{
+  "estimate": {"min_minutes": 10, "max_minutes": 25, "basis": "Active implementation and local tests; excludes queue and approval waits."},
+  "cycle": {"id": "quality", "label": "Review / revise", "iteration": 1, "max_iterations": 3}
+}
+```
+
+Give a realistic active-work time range for each task when supported by the inspected scope and available evidence.
+Explain the estimate's assumptions in basis; omit estimate if unknown rather than fabricate precision.
+Use whole minutes from 1 to 525600, with min_minutes no greater than max_minutes.
+The page computes each wave's ideal parallel duration from the longest task bounds, not the sum; missing task estimates make the wave unknown.
+These estimates exclude queue time, approval waits, and limited worker capacity and are not deadlines.
+For explicitly unrolled cycles, such as a review/revise chain, give their nodes a shared cycle id, label, and max_iterations, with iteration marking the round.
+Review and revision tasks in one round may share iteration; use explicit dependencies for actual order and keep rounds within the requested maximum.
+Cycle metadata is optional and descriptive only: it cannot repeat, skip, or stop tasks, and a maximum is not an automatic early-exit condition.
+All explicitly saved tasks still follow the normal DAG scheduler; do not promise "stop when clean" without a separately supported execution mechanism.
+Use one consistent label and maximum per group; iterations and maximum are integers from 1 to 256.
+Do not infer these groups from names or confuse implementation rounds with planner/critic revision limits or team comparison rounds.
+Plain version: estimate how long each task may take, and label repeated rounds so the page can show them together; the labels do not change what runs.
+
 Every node must have verifiable acceptance criteria and an explicit dependency list, including an empty list for roots.
 Set mode to write only for work nodes that require changing project files; all other nodes are read.
 This declaration requests permission, not grants it.

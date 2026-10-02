@@ -110,6 +110,7 @@ Shared workflow files are for administrator changes that may affect multiple pro
 The planner must return a JSON object with `summary` as a string, `assumptions`, `risks`, and `questions` as string lists, and `nodes` as a list of node objects.
 Each node has string `id`, `title`, and `description` fields; string lists `depends_on` and `acceptance_criteria`; and `kind` equal to `work`, `review`, or `approval`.
 An optional `mode` defaults to `read`; only work nodes can request `write`.
+Optional presentation-only `estimate` and `cycle` objects are described in [task estimates and unrolled rounds](workflows.md#task-estimates-and-unrolled-rounds).
 The graph must have unique identifiers, valid dependency references, and no cycles or self-dependencies.
 The critic must return a JSON object with `verdict` equal to `approved` or `changes_requested`, and a `findings` list.
 The monitor must return a JSON object with integer `reviewed_through` and a `findings` list whose entries have `severity` equal to `info`, `warning`, or `blocking`, string `summary`, and optional string `evidence` and `proposed_action`.
