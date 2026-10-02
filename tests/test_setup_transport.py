@@ -67,11 +67,21 @@ class SetupTransportTests(unittest.TestCase):
                     else json.loads(result["content"][0]["text"])
                 )
 
+            # Real hook process, but without discovering whichever Claude Code process
+            # happens to be running this suite, which never owns the fixture session.
+            hook_program = (
+                "import sys; import orchestrator.bootstrap as bootstrap; "
+                "import orchestrator.hooks as hooks; "
+                "bootstrap.claude_parent = hooks.claude_parent = lambda: None; "
+                "from orchestrator.cli import main; raise SystemExit(main(sys.argv[1:]))"
+            )
+
             def hook(name, arguments):
                 result = subprocess.run(
                     [
                         sys.executable,
-                        str(ROOT / "bin/orchestrator"),
+                        "-c",
+                        hook_program,
                         "--home",
                         str(home),
                         "hooks",

@@ -265,8 +265,10 @@ All prompts remain saved regardless of this classification; quiet prompts remain
 Prompts saved before project selection are mirrored into that project when the instance binds, with duplicate mirroring prevented by prompt identity.
 The monitor waits for foreground completion and `monitoring.quiet_seconds`, which defaults to 20.
 Claude Code runs no hook when the user interrupts a response, so an interrupted turn never reports completion.
-After `monitoring.foreground_stale_seconds` (900 by default, 60 to 86400) without prompt or tool-use hook activity, an unfinished turn permits silent background monitor scheduling, which also supplies the monitor evidence plan approval needs.
-The tradeoff is that a response running that long without any tool call can be reviewed in the background while it is still running.
+After `monitoring.foreground_stale_seconds` (900 by default, 60 to 86400) without activity, an unfinished turn permits silent background monitor scheduling, which also supplies the monitor evidence plan approval needs.
+Claude activity is prompt and tool-use hooks.
+Pi refreshes activity every 30 seconds while its agent is busy, including during one long tool, and stops when Pi reports the agent idle.
+The tradeoff is that a Claude response running that long without any tool call or tool completion can be reviewed in the background while it is still running.
 Interrupting delivery never relies on this limit: it still waits for a completed turn or an exited frontend.
 Plain version: if a turn looks abandoned for 15 minutes, background checks start again, but nothing interrupts the user until the turn really ends.
 Only blocking monitor findings interject; informational and warning findings remain silent but inspectable and acknowledgeable.

@@ -222,15 +222,18 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         return record_prompt(store, session_id, payload.get("prompt", ""))
     if action == "updates":
         return {"updates": store.updates(session_id)}
-    if action in {"foreground_start", "foreground_finished"}:
-        from .monitoring import begin_turn, finish_turn
+    if action in {"foreground_start", "foreground_activity", "foreground_finished"}:
+        from .monitoring import begin_turn, finish_turn, touch_turn
 
         if set(payload) - {"turn_id"}:
             raise StateError("Foreground lifecycle accepts only turn_id")
         turn_id = _text(payload, "turn_id", 128)
-        return (begin_turn if action == "foreground_start" else finish_turn)(
-            store, session_id, turn_id
-        )
+        lifecycle = {
+            "foreground_start": begin_turn,
+            "foreground_activity": touch_turn,
+            "foreground_finished": finish_turn,
+        }
+        return lifecycle[action](store, session_id, turn_id)
     if action == "delivery_updates":
         from .monitoring import delivery_updates
 
@@ -466,6 +469,7 @@ FIELDS = {
     "updates": ({}, []),
     "delivery_updates": ({}, []),
     "foreground_start": ({"turn_id": "string"}, ["turn_id"]),
+    "foreground_activity": ({"turn_id": "string"}, ["turn_id"]),
     "foreground_finished": ({"turn_id": "string"}, ["turn_id"]),
     "retry_review": ({"plan_id": "string", "reason": "string"}, ["plan_id", "reason"]),
     "acknowledge": ({"event_ids": "array"}, ["event_ids"]),
@@ -513,6 +517,7 @@ DESCRIPTIONS = {
     "cancel_task": "Request cancellation of a task owned by this project; wait for terminal confirmation.",
     "delivery_updates": "Read ready notifications split into silent guidance and interrupting events; no automatic acknowledgment.",
     "foreground_start": "Frontend lifecycle: mark this response active using its unique turn ID.",
+    "foreground_activity": "Frontend lifecycle: record that the same response is still running, such as during a long tool.",
     "foreground_finished": "Frontend lifecycle: mark the same response complete; stale IDs cannot finish a newer turn.",
     "retry_review": "Retry only a failed critic using the saved plan and current critic settings, without restarting the planner.",
     "updates": "Read unacknowledged results and monitor feedback without removing them.",

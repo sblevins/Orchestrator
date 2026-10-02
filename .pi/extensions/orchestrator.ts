@@ -64,7 +64,9 @@ export default function (pi: ExtensionAPI) {
   let home: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
-  type ForegroundTurn = { token: string; generation: number; completionPending: boolean; finishing?: Promise<void> };
+  type ForegroundTurn = { token: string; generation: number; completionPending: boolean; touched: number; finishing?: Promise<void> };
+  // Below the 60-second minimum monitoring.foreground_stale_seconds, so a busy turn never looks abandoned.
+  const FOREGROUND_ACTIVITY_MS = 30000;
   let foregroundTurn: ForegroundTurn | undefined;
   let controller: AbortController | undefined;
   const delivered = new Set<number>();
@@ -125,6 +127,15 @@ export default function (pi: ExtensionAPI) {
     try {
       if (version !== generation) return;
       if (foregroundTurn?.completionPending) await finishForegroundTurn(foregroundTurn);
+      if (version !== generation) return;
+      // Refresh only while Pi reports the agent busy, including during one long tool.
+      // An idle leftover turn stays untouched, so stale-marker recovery still applies.
+      const activeTurn = foregroundTurn;
+      if (activeTurn && !activeTurn.completionPending && !ctx.isIdle() &&
+          Date.now() - activeTurn.touched >= FOREGROUND_ACTIVITY_MS) {
+        await request("foreground_activity", { turn_id: activeTurn.token }, controller?.signal);
+        activeTurn.touched = Date.now();
+      }
       if (version !== generation) return;
       const response = await request("delivery_updates", {}, controller?.signal);
       if (version !== generation) return;
@@ -224,7 +235,7 @@ export default function (pi: ExtensionAPI) {
     // Unbound active writers still need lifecycle tracking before project selection.
     if (writableSession) {
       const previousTurn = foregroundTurn;
-      const turn: ForegroundTurn = { token: randomUUID(), generation, completionPending: false };
+      const turn: ForegroundTurn = { token: randomUUID(), generation, completionPending: false, touched: Date.now() };
       foregroundTurn = turn;
       try {
         await request("foreground_start", { turn_id: turn.token });

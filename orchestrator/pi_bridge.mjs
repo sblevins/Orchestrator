@@ -120,14 +120,43 @@ function compactResult(result) {
   return result && typeof result === 'object' && 'content' in result ? { ...result, content: compactContent(result.content) } : result;
 }
 
+// The SDK repeats each tool call in several events, so large write inputs would
+// exhaust OUTPUT_LIMIT. Only the saved copy shrinks; execution and the provider
+// conversation keep the full arguments. Final assistant text stays intact.
+function compactArguments(arguments_) {
+  const serialized = JSON.stringify(arguments_);
+  return serialized === undefined || serialized.length <= TRANSCRIPT_TEXT_LIMIT ? arguments_ : { transcript_excerpt: excerpt(serialized) };
+}
+
+function compactAssistantBlock(block) {
+  if (block?.type === 'toolCall') return { ...block, arguments: compactArguments(block.arguments) };
+  if (block?.type === 'thinking' && typeof block.thinking === 'string') return { ...block, thinking: excerpt(block.thinking) };
+  return block;
+}
+
 function compactMessage(message) {
-  return ['user', 'toolResult'].includes(message?.role) ? compactResult(message) : message;
+  if (['user', 'toolResult'].includes(message?.role)) return compactResult(message);
+  if (message?.role === 'assistant' && Array.isArray(message.content)) return { ...message, content: message.content.map(compactAssistantBlock) };
+  return message;
+}
+
+function compactStreamEvent(update) {
+  if (update?.type === 'toolcall_delta' && typeof update.delta === 'string') {
+    const { delta, ...rest } = update;
+    return { ...rest, deltaLength: delta.length };
+  }
+  if (update?.type === 'toolcall_end') return { ...update, toolCall: compactAssistantBlock(update.toolCall) };
+  if (update?.type === 'done') return { ...update, message: compactMessage(update.message) };
+  if (update?.type === 'error') return { ...update, error: compactMessage(update.error) };
+  return update;
 }
 
 function transcriptEvent(event) {
   const compacted = { ...event };
   for (const key of ['result', 'partialResult']) if (key in compacted) compacted[key] = compactResult(compacted[key]);
+  if ('args' in compacted) compacted.args = compactArguments(compacted.args);
   if ('message' in compacted) compacted.message = compactMessage(compacted.message);
+  if ('assistantMessageEvent' in compacted) compacted.assistantMessageEvent = compactStreamEvent(compacted.assistantMessageEvent);
   for (const key of ['toolResults', 'messages']) if (Array.isArray(compacted[key])) compacted[key] = compacted[key].map(compactMessage);
   return compacted;
 }

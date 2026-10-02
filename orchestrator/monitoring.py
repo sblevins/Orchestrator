@@ -74,12 +74,16 @@ def finish_turn(store, session_id: str, turn_id: str | None = None) -> dict:
         )
 
 
-def touch_turn(store, session_id: str) -> dict | None:
-    """Record real activity in an unfinished foreground turn."""
+def touch_turn(store, session_id: str, turn_id: str | None = None) -> dict | None:
+    """Record real activity in an unfinished foreground turn; a stale ID never refreshes a newer one."""
     with store.transaction() as database:
         _writer(database, session_id)
         marker = _marker(database, session_id)
-        if not marker or not marker["active"]:
+        if (
+            not marker
+            or not marker["active"]
+            or (turn_id is not None and marker["token"] != turn_id)
+        ):
             return marker
         return _save(database, session_id, {**marker, "touched": time.time()})
 

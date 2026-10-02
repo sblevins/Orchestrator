@@ -125,6 +125,37 @@ class ToolRecoveryTests(unittest.TestCase):
             self.assertEqual((self.cwd / name).read_text(), "project configuration")
             self.assertFalse((self.source / name).exists())
 
+    def test_large_writes_do_not_exhaust_saved_transcript(self):
+        self.options.update(mode="write", tools=["read", "write"], trusted=True)
+        contents = {
+            name: "".join(f"{name} line {index} 漢字\n" for index in range(32000))
+            for name in ("first.txt", "second.txt")
+        }
+        self.assertTrue(
+            all(800 * 1024 < len(text.encode()) < 1024 * 1024 for text in contents.values())
+        )
+        responses = [
+            self.tool_call(name, "write", {"path": name, "content": text})
+            for name, text in contents.items()
+        ]
+        responses.append({"content": "large files written"})
+        with self.server(responses) as models:
+            result = self.run_bridge(models)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout[-2000:])
+        self.assertEqual(
+            fixtures.parse_result("pi", result.stdout, 0)["text"], "large files written"
+        )
+        self.assertLess(len(result.stdout.encode()), 512 * 1024)
+        for name, text in contents.items():
+            self.assertEqual((self.cwd / name).read_text(), text)
+        # Only the saved transcript is bounded; the provider still sees the full calls.
+        replayed = {
+            call["id"]: json.loads(call["function"]["arguments"])["content"]
+            for message in self.requests[-1]["messages"]
+            for call in message.get("tool_calls", [])
+        }
+        self.assertEqual(replayed, contents)
+
     def test_trusted_internal_instruction_alias_can_be_read_and_edited(self):
         (self.cwd / "AGENTS.md").write_text("Original project instructions")
         (self.cwd / "CLAUDE.md").symlink_to("AGENTS.md")

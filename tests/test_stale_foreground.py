@@ -13,7 +13,7 @@ from orchestrator.hooks import handle_hook
 from orchestrator.monitoring import begin_turn, delivery_updates, finish_turn
 from orchestrator.project_settings import configure_project
 from orchestrator.runtime import process_identity
-from orchestrator.store import Store
+from orchestrator.store import StateError, Store
 
 
 class StaleForegroundTests(unittest.TestCase):
@@ -136,6 +136,28 @@ class StaleForegroundTests(unittest.TestCase):
         self.assertFalse(delivery_updates(self.store, "writer", 20)["ready"])
         self.clock.return_value = 1070
         self.assertTrue(delivery_updates(self.store, "writer", 20)["ready"])
+
+    def test_frontend_activity_keeps_only_its_own_turn_live(self):
+        from orchestrator.api import request
+
+        request(self.home, "writer", "foreground_start", {"turn_id": "pi-turn"})
+        for second in range(130, 3000, 30):
+            self.clock.return_value = second
+            request(self.home, "writer", "foreground_activity", {"turn_id": "pi-turn"})
+            self.assertIsNone(self.store.monitor_candidate("project"))
+        self.clock.return_value = 2980 + 899
+        self.assertIsNone(self.store.monitor_candidate("project"))
+        self.assertFalse(delivery_updates(self.store, "writer", 20)["ready"])
+        self.clock.return_value = 2980 + 900
+        self.assertIsNotNone(self.store.monitor_candidate("project"))
+        # Activity from a superseded turn cannot keep a newer idle turn live.
+        request(self.home, "writer", "foreground_start", {"turn_id": "newer"})
+        self.clock.return_value = 5000
+        marker = request(self.home, "writer", "foreground_activity", {"turn_id": "pi-turn"})
+        self.assertEqual((marker["token"], marker["touched"]), ("newer", 2980 + 900))
+        self.assertIsNotNone(self.store.monitor_candidate("project"))
+        with self.assertRaises(StateError):
+            request(self.home, "writer", "foreground_activity", {"turn_id": "newer", "x": 1})
 
     def test_stale_bookkeeping_never_delivers_mid_response(self):
         self.hook("UserPromptSubmit", prompt="Rewrite the scheduler")

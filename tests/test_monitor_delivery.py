@@ -288,6 +288,39 @@ if (readOnly) {
   console.log('quiet delivery passed');
   process.exit(0);
 }
+if (scenario === 'heartbeat') {
+  let clock = Date.now();
+  Date.now = () => clock;
+  const activity = () => requests.filter(request => request.action === 'foreground_activity');
+  await handlers.get('before_agent_start')(prompt(), ctx);
+  const token = persistedTurn.token;
+  busy = true;
+  await poll();
+  assert.equal(activity().length, 0);
+  // One long tool: no Pi events arrive, but the busy agent keeps its turn live.
+  for (let step = 1; step <= 40; step++) {
+    clock += 30000;
+    await poll();
+    assert.equal(activity().length, step);
+  }
+  assert(activity().every(request => request.payload.turn_id === token));
+  await poll();
+  assert.equal(activity().length, 40);
+  // An idle leftover turn is never refreshed, so stale-marker recovery still applies.
+  busy = false;
+  clock += 3600000;
+  await poll();
+  assert.equal(activity().length, 40);
+  await handlers.get('agent_end')({}, ctx);
+  busy = true;
+  clock += 3600000;
+  await poll();
+  assert.equal(activity().length, 40);
+  assert.deepEqual(persistedTurn, {token, active: false});
+  await handlers.get('session_shutdown')({}, ctx);
+  console.log('quiet delivery passed');
+  process.exit(0);
+}
 if (['retry-once', 'retry', 'stale-retry'].includes(scenario)) {
   await handlers.get('before_agent_start')(prompt(), ctx);
   const completedToken = persistedTurn.token;
@@ -397,6 +430,9 @@ class PiMonitorDeliveryTests(unittest.TestCase):
 
     def test_stale_completion_retry_cannot_finish_new_turn(self):
         self.run_scenario("stale-retry")
+
+    def test_busy_turn_refreshes_activity_and_idle_turn_does_not(self):
+        self.run_scenario("heartbeat")
 
     def test_observer_prompt_does_not_abort(self):
         self.run_scenario("observer")
