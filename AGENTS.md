@@ -35,8 +35,8 @@ Report routability and blockers; on stale revisions reread and reconcile rather 
 This writes only the bound project's `.orchestrator/crew-dispatch.json` and never launches or accepts work.
 Use `project_settings` and `configure_project(settings, expected_revision)` for partial project settings, with optional revision checking.
 Only private `config/projects/<bound-id>.json` changes, never global settings, `config/local.toml`, tracked defaults, or another project.
-Roles, effort, personalization, monitoring, `planning.templates` named validated graphs, execution, and permissions are configurable here.
-Role and model settings apply to new tasks; permissions, worker enablement, and worker concurrency are live controls.
+Roles, effort, personalization, monitoring, `planning.templates` named validated graphs, specialist `context.read_roots`, execution, and permissions are configurable here.
+Role, model, and `context.read_roots` settings apply to new tasks; permissions, worker enablement, and worker concurrency are live controls.
 Native foreground changes still use `/model` and `/effort`.
 Arbitrary adapter and frontend executable commands cannot be configured conversationally because they can affect things outside the project.
 Classifications map names to a profile or `{team: [profiles]}`; the caller chooses `easy`, `hard`, or `very-hard` difficulty, or exact effort.

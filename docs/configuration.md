@@ -37,7 +37,7 @@ A `null` value removes only this project's own override for that setting, restor
 Unknown setting names are rejected with spelling guidance; shared-only `supervisor.max_parallel` and `supervisor.poll_seconds` are rejected in favor of `execution.max_parallel` and `config/local.toml`.
 If a project's effective settings become invalid, only that project's background work pauses and a notification explains the error.
 Its coordinator can still receive prompts and use the Orchestrator tools to inspect `project_settings` and repair it with `configure_project`, while other tools stay blocked until the repair.
-Settings include roles and effort, personalization, monitoring, planning and named templates, execution, and permissions.
+Settings include roles and effort, personalization, monitoring, planning and named templates, specialist read context, execution, and permissions.
 Arbitrary adapter/frontend executable changes are rejected conversationally because a replacement executable can affect things outside the project and ignore safety flags.
 Existing tasks keep captured role, model, and specialist read-context settings.
 Project permissions, worker enablement, and worker concurrency are live controls.

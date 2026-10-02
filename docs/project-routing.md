@@ -126,8 +126,8 @@ Plain version: each worker checks the same files, then checks everyone's reports
 `project_settings` returns effective settings and a `revision`.
 `configure_project(settings, expected_revision)` accepts partial settings and optional revision checking, writing only private `<home>/config/projects/<bound-id>.json`.
 It never changes global settings, local TOML, tracked defaults, another project, or arbitrary executable commands.
-Roles, effort, personalization, monitoring, validated `planning.templates` graphs, execution, and permissions are configurable.
-Role/model settings are captured for tasks, so updated choices apply to new tasks rather than replacing a running model.
+Roles, effort, personalization, monitoring, validated `planning.templates` graphs, specialist `context.read_roots`, execution, and permissions are configurable.
+Role/model settings and specialist read roots are captured for tasks, so updated choices apply to new tasks rather than replacing a running model.
 Permissions, concurrency, and worker/routing disable settings remain live at their enforcement points; do not treat the task snapshot as permission to ignore current controls.
 Use native `/model` and `/effort` for the current foreground session.
 Plain version: new jobs can use new models, while current permission and scheduling rules still control what may proceed.
