@@ -220,6 +220,19 @@ def _prompt(store: Store, task: dict, role: dict) -> str:
         "project_root": store.project(task["project_id"])["root"],
         "personalization": task["config"]["personalization"],
     }
+    if task["role"] != "worker":
+        from .read_context import supervisor_exclusions, validate_read_roots
+
+        context["read_roots"] = validate_read_roots(
+            task["config"].get("context", {}).get("read_roots", []),
+            require_available=True,
+            excluded_paths=supervisor_exclusions(store.home),
+        )
+        context["read_context_usage"] = (
+            "Project-relative references still target the registered project_root; use absolute "
+            "tool paths, including for additional read_roots identified by alias. These are mutable read context, "
+            "not pinned Git snapshots. Read/list/search only; no additional write authority."
+        )
     if task["role"] == "planner":
         from .graphs import configured_workflow
 
@@ -320,6 +333,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 output_path,
                 session_id=_resume_session(store, task),
                 project_root=Path(store.project(task["project_id"])["root"]),
+                read_roots=config.get("context", {}).get("read_roots", []),
                 stdin_prompt=True,
             )
         deadline = time.monotonic() + settings["task_timeout_seconds"]

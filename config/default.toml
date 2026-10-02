@@ -19,6 +19,10 @@ workflow = "plan-review"
 clarification = "material"
 max_review_rounds = 3
 
+# Extra mutable read-only directories for specialists, never worker authority.
+[context]
+read_roots = []
+
 [execution]
 mode = "restricted"
 unattended = false

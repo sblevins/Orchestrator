@@ -13,6 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from .models import model_family
+from .read_context import supervisor_exclusions, validate_read_roots
 
 
 class ConfigurationError(ValueError):
@@ -126,6 +127,14 @@ def validate_config(config: dict) -> None:
     """Validate required structure and safety limits without model-name enums."""
     if not isinstance(config, dict):
         _fail("config must be a table")
+    if "context" in config:
+        context = _table(config, "context")
+        if set(context) != {"read_roots"}:
+            _fail("context supports only read_roots, a list of {alias, path} entries")
+        try:
+            validate_read_roots(context["read_roots"])
+        except ValueError as error:
+            _fail(str(error))
     if "permissions" in config:
         permissions = _table(config, "permissions")
         choices = {"coordinator_approvals", "require_write_approval", "enforce_monitor_holds"}
@@ -350,6 +359,12 @@ def load_config(home: Path, project_id: str | None = None) -> dict:
     config = unvalidated_config(home, project_id)
     try:
         validate_config(config)
+        validate_read_roots(
+            config.get("context", {}).get("read_roots", []),
+            excluded_paths=supervisor_exclusions(home),
+        )
+    except ValueError as error:
+        raise ConfigurationError(str(error)) from error
     except RuntimeError as error:
         raise ConfigurationError(f"cannot validate configuration: {error}") from error
     return config

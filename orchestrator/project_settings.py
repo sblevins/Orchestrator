@@ -19,10 +19,11 @@ from .config import (
     validate_config,
 )
 from .onboarding import _session
+from .read_context import supervisor_exclusions, validate_read_roots
 from .store import StateError, encode
 
 MESSAGE = (
-    "Role/model settings apply to NEW tasks, not running tasks. "
+    "Role/model settings and context.read_roots apply to NEW tasks, not already captured tasks. "
     "Project permissions, worker enablement and worker concurrency are live controls. "
     "To change the native foreground model or effort, use /model and /effort."
 )
@@ -144,10 +145,28 @@ def configure_project(store, session_id, settings, expected_revision=None):
         if expected_revision is not None and expected_revision != revision:
             raise StateError("Project settings changed; reread project_settings before saving")
         _check_names(settings, _schema(), override)
+        settings = deepcopy(settings)
+        context = settings.get("context")
+        if isinstance(context, dict) and context.get("read_roots") is not None:
+            try:
+                context["read_roots"] = validate_read_roots(
+                    context["read_roots"],
+                    normalize=True,
+                    excluded_paths=supervisor_exclusions(store.home),
+                )
+            except ValueError as error:
+                raise ConfigurationError(str(error)) from error
         updated = _apply(override, settings)
         current = unvalidated_config(store.home, project_id, override)
         effective = unvalidated_config(store.home, project_id, updated)
         validate_config(effective)
+        try:
+            validate_read_roots(
+                effective.get("context", {}).get("read_roots", []),
+                excluded_paths=supervisor_exclusions(store.home),
+            )
+        except ValueError as error:
+            raise ConfigurationError(str(error)) from error
         # A replacement executable can ignore all harness safety flags. Chat settings
         # can tune roles and resources, but cannot install executable entry points.
         for section in ("adapters", "frontends"):

@@ -48,7 +48,11 @@ The monitor selects supplied legacy pending plan requests and recommends classif
 Standing unattended authorization lets the supervisor use a recommended classification with configured profile effort or the project's worker_difficulty, without waiting for a foreground turn.
 For read-only audit, research, or design, a description may recommend a configured comparison team, with acceptance criteria that assess evidence and unresolved disagreements rather than require consensus.
 Teams use the same frozen Git commit and accepted dependencies for two rounds and can exchange durable peer messages; only the parent result is accepted.
-Use execution.base_ref for an agreed non-main branch rather than declaring worktree setup impossible.
+Use execution.base_ref for an agreed non-main worker branch rather than declaring worktree setup impossible.
+For specialist reading, inspect the captured read_roots aliases and use their absolute paths; project-relative references still refer to the registered project_root.
+These are mutable reference directories, not pinned Git snapshots or permission to write.
+If a required sibling worktree is not listed, ask the coordinator to configure project-local context.read_roots for new work rather than rebinding project history or claiming execution.base_ref grants read access.
+Plain version: read the named reference folders, and ask for a missing folder without changing the project.
 Trusted workers or command-enabled workers can run builds and tests themselves; include verifiable checks, not instructions for the user to test every change manually.
 Project-local approval preferences are configurable, so do not invent operator-only CLI gates or unnecessary approval nodes.
 Independent review, fresh monitor evidence for plan approval, dependency correctness, and checked candidate acceptance still apply.

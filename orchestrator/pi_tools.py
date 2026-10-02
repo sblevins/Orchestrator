@@ -147,13 +147,38 @@ class FileBroker:
             or self.cwd in self.project.parents
         ):
             raise PolicyError("write worktree must be separate from source checkout")
+        context_policy = owned_module("read_context")
+        private_paths = [options[key] for key in ("auth_path", "agent_dir") if options.get(key)]
+        if self.mode == "read" and self.worker_context is None and self.cwd != self.project:
+            private_paths.append(self.cwd)
+        try:
+            self.read_roots = context_policy.validate_read_roots(
+                options.get("read_roots", []),
+                require_available=True,
+                excluded_paths=private_paths,
+            )
+        except ValueError as error:
+            raise PolicyError(str(error)) from error
+        if self.read_roots and (self.mode != "read" or self.worker_context is not None):
+            raise PolicyError("Additional read roots are only available to read-only specialists")
+        # Deny private subtrees, not ordinary source above them. The supervisor
+        # may coordinate its own checkout, with private runs inside that project.
+        self.private_paths = {
+            candidate
+            for path in private_paths
+            for candidate in (Path(os.path.abspath(path)), Path(path).resolve())
+        }
         # Review tasks run from private supervisor directories. Those directories
         # contain task metadata, not model-readable project material.
         if self.mode == "read" and self.worker_context is None:
             self.cwd = self.project
         self.roots = {}
         try:
-            for root in {self.cwd, self.project}:
+            for root in {
+                self.cwd,
+                self.project,
+                *(Path(entry["path"]) for entry in self.read_roots),
+            }:
                 self.roots[root] = plain_directory(root)
         except BaseException:
             self.close()
@@ -163,6 +188,13 @@ class FileBroker:
         for descriptor in self.roots.values():
             os.close(descriptor)
         self.roots.clear()
+
+    def is_private(self, path):
+        return any(path == private or private in path.parents for private in self.private_paths)
+
+    def check_private(self, path):
+        if self.is_private(path):
+            raise AuthorityError("authentication and private runtime paths are forbidden")
 
     def locate(self, value, write=False):
         if not isinstance(value, str) or not value or "\x00" in value or "~" in value:
@@ -186,6 +218,7 @@ class FileBroker:
                 relative = absolute.relative_to(root)
             except ValueError:
                 continue
+            self.check_private(absolute)
             if any(forbidden(part, write=write, trusted=self.trusted) for part in relative.parts):
                 raise AuthorityError("control files and hidden paths are forbidden")
             if write and (self.mode != "write" or not relative.parts):
@@ -195,6 +228,7 @@ class FileBroker:
 
     @contextlib.contextmanager
     def directory(self, root, parts, create=False):
+        self.check_private(root.joinpath(*parts))
         descriptor = os.dup(self.roots[root])
         try:
             for part in parts:
@@ -213,6 +247,7 @@ class FileBroker:
             os.close(descriptor)
 
     def file_text(self, root, parts):
+        self.check_private(root.joinpath(*parts))
         if not parts:
             raise PolicyError("expected a regular file")
         with self.directory(root, parts[:-1]) as parent:
@@ -240,6 +275,7 @@ class FileBroker:
                 os.close(descriptor)
 
     def write_text(self, root, parts, content):
+        self.check_private(root.joinpath(*parts))
         if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_BYTES:
             raise PolicyError("invalid or oversized file content")
         with self.directory(root, parts[:-1], create=True) as parent:
@@ -384,10 +420,12 @@ class FileBroker:
                     visited += 1
                     if visited > MAX_VISITED:
                         raise PolicyError("directory scan exceeds limit")
-                    if forbidden(entry.name, trusted=self.trusted):
+                    child = (*current, entry.name)
+                    if forbidden(entry.name, trusted=self.trusted) or self.is_private(
+                        root.joinpath(*child)
+                    ):
                         continue
                     metadata = entry.stat(follow_symlinks=False)
-                    child = (*current, entry.name)
                     if stat.S_ISDIR(metadata.st_mode):
                         pending.append(child)
                     elif stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
@@ -452,7 +490,9 @@ class FileBroker:
                 for index, entry in enumerate(entries):
                     if index >= MAX_VISITED:
                         raise PolicyError("directory scan exceeds limit")
-                    if forbidden(entry.name, trusted=self.trusted):
+                    if forbidden(entry.name, trusted=self.trusted) or self.is_private(
+                        root.joinpath(*parts, entry.name)
+                    ):
                         continue
                     metadata = entry.stat(follow_symlinks=False)
                     if stat.S_ISDIR(metadata.st_mode):
@@ -509,7 +549,7 @@ _OWNED_MODULES = {}
 
 def owned_module(name):
     """Load only a fixed adjacent program module under Python -I, never project imports."""
-    if name not in {"images", "commands", "team_messages", "worker_mcp"}:
+    if name not in {"images", "commands", "team_messages", "worker_mcp", "read_context"}:
         raise PolicyError("Unknown owned module")
     if name not in _OWNED_MODULES:
         package_name = "orchestrator"
@@ -634,14 +674,16 @@ def trusted_installation(executable, roots):
 def launch(options):
     cwd = Path(os.path.abspath(options["cwd"]))
     project = Path(os.path.abspath(options.get("project_root") or cwd))
-    # Validate descriptor roots before importing any Pi runtime code.
-    broker = FileBroker(options)
-    broker.close()
-    package = trusted_installation(options["executable"], {cwd, project})
-    if options["mode"] == "write" and cwd in Path(__file__).resolve().parents:
-        raise PolicyError("worker cannot overwrite its supervisor installation")
     auth_directory = os.environ.get("PI_CODING_AGENT_DIR", str(Path.home() / ".pi" / "agent"))
     auth_path = (Path(auth_directory).expanduser().resolve() / "auth.json").resolve()
+    options = {**options, "auth_path": str(auth_path)}
+    # Validate every descriptor root before importing any Pi runtime code.
+    broker = FileBroker(options)
+    effective_roots = set(broker.roots)
+    broker.close()
+    package = trusted_installation(options["executable"], effective_roots | {cwd, project})
+    if options["mode"] == "write" and cwd in Path(__file__).resolve().parents:
+        raise PolicyError("worker cannot overwrite its supervisor installation")
     # All cooperating Pi writers use the canonical auth path, not per-worker aliases.
     node = shutil.which("node", path="/usr/local/bin:/usr/bin:/bin")
     if node is None:

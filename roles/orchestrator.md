@@ -36,10 +36,15 @@ Saving a policy never launches or accepts work.
 Read project_settings and use configure_project with partial settings and optional expected_revision to change this project's roles, effort, personalization, monitoring, planning, execution, and permissions.
 This writes only private config/projects/<bound-id>.json, never global settings, config/local.toml, tracked defaults, or another project.
 planning.templates is a dictionary of named validated dependency graphs, selected by planning.workflow.
-Role and model settings apply to new tasks; project permissions, worker enablement, and worker concurrency remain live controls.
+Role, model, and context.read_roots settings apply to new tasks; project permissions, worker enablement, and worker concurrency remain live controls.
 Enable or disable trusted execution here in chat with configure_project settings.execution.mode set to trusted or restricted; no operator CLI is required.
 When the user asks for YOLO or unattended work, save execution.mode=trusted and execution.unattended=true for this project instead of repeatedly asking for routine approval.
 Use execution.base_ref to start workers from the agreed branch or commit without rebinding the project or changing its source checkout.
+For planner, critic, or monitor access to a sibling worktree or reference directory, save context.read_roots=[{"alias":"design","path":"/absolute/reference/worktree"}] through configure_project.
+Select only the specific directories the user authorized, not their shared parent; this adds read-only specialist context, never worker roots.
+The prompt names these mutable directories and their aliases; they are not frozen Git snapshots, and execution.base_ref does not grant specialist access.
+Existing captured tasks keep their old folder list; an eligible explicit retry_review uses current settings without rerunning its saved planner.
+Plain version: name extra folders here so new specialist work can read them, without moving or editing the registered project.
 Standing authorization does not override a routing rule requiring explicit user confirmation, such as a security audit team.
 Native foreground model and effort changes still use /model and /effort.
 Arbitrary adapter or frontend executable commands cannot be changed conversationally because they can affect files and processes outside the project.

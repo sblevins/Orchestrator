@@ -38,7 +38,7 @@ class RuntimeTests(unittest.TestCase):
         (self.install / "orchestrator/adapters.py").write_text("""
 import json, sys
 def build_command(config, role, prompt, cwd, output_path, session_id=None, *,
-                  project_root=None, stdin_prompt=False):
+                  project_root=None, read_roots=None, stdin_prompt=False):
     assert project_root is not None and stdin_prompt
     return [sys.executable, config['adapters']['claude']['command'][0]]
 def parse_result(adapter, stdout, returncode):
