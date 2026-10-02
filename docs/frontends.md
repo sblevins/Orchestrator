@@ -12,7 +12,10 @@ See [worker visibility](worker-visibility.md) for Claude-only Haiku watchers and
 Run `claude` or `pi` directly from `~/Agents/Orchestrator`.
 Claude discovers `CLAUDE.md`, project lifecycle hooks, and `.mcp.json`; Pi discovers `AGENTS.md` and `.pi/extensions/orchestrator.ts`.
 Native trust prompts still require user approval.
-The coordinator asks for a project, binds the instance, loads notes/status, and starts the shared supervisor as needed.
+The coordinator asks for a project, binds the instance, loads notes/status and initial setup state, and starts the shared supervisor as needed.
+Both frontends expose `project_setup` and `setup_project`, so creating and validating the initial worker policy is possible from the conversation.
+These narrowly scoped setup writes do not require Bash and do not grant source changes or execution approval.
+The coordinator asks for missing worker preferences instead of requiring operator commands or choosing models without your direction.
 Plain version: open the normal chat program here; the project supplies its coordinator setup automatically.
 
 Claude startup resolves its own ancestor process identity and native conversation ID into a durable instance.
@@ -72,6 +75,7 @@ The launcher generates owner-only hook settings with absolute installed paths, s
 It loads user settings plus its generated settings, excluding project/local settings to avoid registering the repository hooks twice.
 Launched frontends receive the configured role and personalization through a private prompt file; native startup supplies them through Claude hook context or Pi prompt sections.
 Claude PreToolUse and Pi tool-call guards block implementation tools and unrelated plugin tools, even when the native interface exposes them.
+Initial policy setup is an explicit owned-tool exception to foreground read-only behavior, not a blanket shell bypass.
 The ordinary local Claude MCP configuration uses an explicit session ID from startup context, and the hook rejects attempts to use another instance's ID.
 Configured read tools are translated into the native frontend allowlist; file-edit tools and untracked worker dispatch remain blocked.
 Claude Agent is permitted only for an exact prepared watcher invocation; Pi spawns observers through its owned public-RPC integration, not unrestricted Agent tools.

@@ -185,7 +185,7 @@ def _private_choice(path: Path) -> dict:
 
 
 def _routing(home, store, arguments):
-    from .routing import RoutingError, load_policy, resolve_selection
+    from .routing import load_policy, policy_readiness
 
     project = store.project(arguments.project)
     if arguments.routing_command == "init":
@@ -198,35 +198,7 @@ def _routing(home, store, arguments):
     loaded = load_policy(home, Path(project["root"]))
     if arguments.routing_command == "show":
         return loaded
-    policy = loaded["policy"]
-    profiles = [(index, rule["use"]) for index, rule in enumerate(policy.get("rules", []))]
-    if "default" in policy:
-        profiles.append(("default", policy["default"]))
-    executable_profiles = 0
-    blockers = []
-    for rule, choices in profiles:
-        for candidate, profile in enumerate(choices if isinstance(choices, list) else [choices]):
-            choice = {
-                "rule": rule,
-                "candidate": candidate,
-                "model": profile.get("model"),
-                "effort": profile.get("effort"),
-                "rationale": "Operator policy validation",
-            }
-            try:
-                resolve_selection(policy, choice)
-                executable_profiles += 1
-            except RoutingError as error:
-                blockers.append({"rule": rule, "candidate": candidate, "reason": str(error)})
-    return {
-        **loaded,
-        "valid": True,
-        "routable": executable_profiles > 0,
-        "executable_profiles": executable_profiles,
-        "blockers": blockers,
-        "message": "Schema validation does not prove model access or authorize execution. "
-        "Workers still need an explicit selection and any required approval.",
-    }
+    return {**loaded, **policy_readiness(loaded["policy"])}
 
 
 def _read_hook_input() -> dict:

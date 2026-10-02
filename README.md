@@ -117,7 +117,14 @@ See [worker visibility](docs/worker-visibility.md) for attachment, reattachment,
 
 ## Worker setup
 
-Create an empty project policy, then add your preferred profiles and routing guidelines:
+Tell the coordinator to finish initial project setup.
+After binding, it can create and validate `.orchestrator/crew-dispatch.json` through its own setup tools, without asking you to run shell commands.
+It asks for missing worker model/effort preferences instead of inventing defaults.
+Initial setup permissions close after configuration; they never grant source-code writes or worker approval.
+An untracked regular worker-policy file does not make an otherwise clean repository ineligible for write workers.
+Plain version: give it your worker preferences in chat, and it saves the setup for you.
+
+The CLI remains available if you prefer manual setup:
 
 ```bash
 ./bin/orchestrator routing init --project my-project

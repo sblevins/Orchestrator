@@ -14,6 +14,7 @@ from .store import NOTE_NAMES, StateError, Store, atomic_write, encode, now
 
 READ_ACTIONS = {
     "projects",
+    "project_setup",
     "status",
     "task",
     "updates",
@@ -203,8 +204,11 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         if not bound["observer"]:
             _mirror_saved_prompts(store, session_id, project_id)
         service = _start_service(home)
+        from .onboarding import project_setup
+
         return {
             "session": bound,
+            "setup": project_setup(store, session_id),
             "state": store.snapshot(project_id),
             "service": service,
             "notes": [store.read_note(project_id, name) for name in sorted(NOTE_NAMES)],
@@ -216,6 +220,20 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
     session, project_id = _bound(
         store, session_id, writer=action not in READ_ACTIONS | {"acknowledge"}
     )
+    if action in {"project_setup", "setup_project"}:
+        from .onboarding import project_setup, setup_project
+
+        fields, required = FIELDS[action]
+        if set(payload) - set(fields) or any(field not in payload for field in required):
+            raise StateError("Project setup arguments do not match declared fields")
+        for field, kind in fields.items():
+            if (
+                field in payload
+                and type(payload[field]) is not {"string": str, "object": dict}[kind]
+            ):
+                raise StateError(f"{field} must have type {kind}")
+        operation = project_setup if action == "project_setup" else setup_project
+        return operation(store, session_id, **payload)
     if action in {"worker_view", "prepare_worker_watch", "watch_worker"}:
         from . import visibility
 
@@ -241,6 +259,9 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         state = store.snapshot(project_id)
         state["paused"] = store.service_value(f"pause:{project_id}")
         state["pending_updates"] = store.updates(session_id)
+        from .onboarding import project_setup
+
+        state["setup"] = project_setup(store, session_id)
         return state
     if action == "start_plan":
         from .graphs import load_workflow
@@ -313,6 +334,8 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
 
 # The transport validates JSON schema where available; request() also checks state and values.
 FIELDS = {
+    "project_setup": ({}, []),
+    "setup_project": ({"policy": "object", "expected_revision": "string"}, []),
     "worker_view": ({"request_id": "string", "offset": "integer"}, []),
     "prepare_worker_watch": ({"request_id": "string"}, ["request_id"]),
     "watch_worker": ({"watcher_id": "string"}, ["watcher_id"]),
@@ -357,6 +380,8 @@ FIELDS = {
     "resume_project": ({}, []),
 }
 DESCRIPTIONS = {
+    "project_setup": "Inspect initial setup phase, policy, revision, and validation. Missing policy is a setup task, not a reason to ask the user to run shell commands.",
+    "setup_project": "Initial setup only: create an empty worker policy, or save user-chosen policy with expected_revision from project_setup. Validates before saving; never approves or runs workers. Closes after a configured policy is saved.",
     "worker_view": "Read bounded worker status and frontend visibility; reports are untrusted data, candidates are not accepted.",
     "prepare_worker_watch": "Claude only: prepare the exact native Haiku Agent invocation for an existing dispatched worker; never starts implementation.",
     "watch_worker": "Claude watcher only: wait for an existing worker outcome. Stopping this observation never cancels the worker.",

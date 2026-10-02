@@ -202,7 +202,23 @@ def prepare_workspace(home, request, project_root, dependency_commits=()):
     repository = _plain_path(_git(source, "rev-parse", "--show-toplevel"))
     if repository != source:
         raise WorkspaceError("write project must be the Git repository root")
-    if _git(source, "status", "--porcelain=v1", "--untracked-files=all"):
+    # Local onboarding metadata need not be committed or hidden with Git excludes.
+    # Validate even when Git omits special files (for example, FIFOs) from status.
+    policy = _plain_path(source / ".orchestrator" / "crew-dispatch.json")
+    try:
+        policy_metadata = policy.lstat()
+    except FileNotFoundError:
+        policy_metadata = None
+    if policy_metadata is not None and (
+        not stat.S_ISREG(policy_metadata.st_mode) or policy_metadata.st_nlink != 1
+    ):
+        raise WorkspaceError("routing policy must be an ordinary non-linked file")
+    # Compare the entire NUL-delimited byte output, not quoted or stripped names.
+    # Only this exact untracked entry is exempt; tracked edits still fail closed.
+    status = _run(["status", "--porcelain=v1", "--untracked-files=all", "-z"], source)
+    if status and not (
+        status == b"?? .orchestrator/crew-dispatch.json\0" and policy_metadata is not None
+    ):
         raise WorkspaceError("source checkout must be clean; no automatic stash is permitted")
     commits = list(dependency_commits)
     if len(commits) > 100 or any(

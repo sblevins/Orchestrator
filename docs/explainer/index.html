@@ -33,7 +33,8 @@ Stopping an observer does not cancel the actual worker.</desc><defs><marker id="
 It saves project state, runs independent planning and criticism, and supervises a slow background monitor.
 It is not a Temporal deployment or a third-party Pi orchestration plugin.</p>
 <blockquote><p><strong>Worker routing and worker execution are enabled, with no worker model defaults.</strong>
-Configure project policy in <code>.orchestrator/crew-dispatch.json</code> before selecting workers.
+Ask the coordinator to finish initial setup; it can create and validate <code>.orchestrator/crew-dispatch.json</code> using worker preferences you choose, without a shell-command handoff.
+An untracked regular policy file alone does not block write-worker preparation.
 Missing or invalid policy blocks dispatch; enabling the feature does not authorize writes or accept results.</p></blockquote>
 <p>Plain version: the quick model talks with you, stronger models design and check the work, and software remembers the jobs.
 Workers can prepare changes, but you decide whether to accept them.</p>

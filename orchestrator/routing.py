@@ -371,3 +371,38 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
         "evidence": capture_quota_evidence(),
         "uncertainty": ["Quota availability and model catalog support have not been verified"],
     }
+
+
+def policy_readiness(policy) -> dict:
+    """Validate configured selections without dispatch, inference, or quota guesses."""
+    policy = validate_policy(policy)
+    profiles = [(index, rule["use"]) for index, rule in enumerate(policy.get("rules", []))]
+    if "default" in policy:
+        profiles.append(("default", policy["default"]))
+    executable_profiles = 0
+    blockers = []
+    for rule, choices in profiles:
+        for candidate, profile in enumerate(choices if isinstance(choices, list) else [choices]):
+            choice = {
+                "rule": rule,
+                "candidate": candidate,
+                "model": profile.get("model"),
+                "effort": profile.get("effort"),
+                "rationale": "Policy readiness validation",
+                "confidence": 1,
+            }
+            if "provider" in profile:
+                choice["provider"] = profile["provider"]
+            try:
+                resolve_selection(policy, choice)
+                executable_profiles += 1
+            except RoutingError as error:
+                blockers.append({"rule": rule, "candidate": candidate, "reason": str(error)})
+    return {
+        "valid": True,
+        "routable": executable_profiles > 0,
+        "executable_profiles": executable_profiles,
+        "blockers": blockers,
+        "message": "Schema validation does not prove model access or authorize execution. "
+        "Workers still need an explicit selection and any required approval.",
+    }

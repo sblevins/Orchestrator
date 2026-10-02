@@ -174,7 +174,9 @@ Use native `/model` and `/effort`, or the optional launcher, to select the confi
 `routing.rules` and `routing.first_mate` remain empty compatibility fields, not active inline policy.
 Set worker preferences in `<project-root>/.orchestrator/crew-dispatch.json`, falling back to `<home>/config/crew-dispatch.json` only when the project file is absent.
 Invalid project policy is an error, never permission to use a fallback.
-See [worker routing](workers.md) for the FirstMate-compatible policy format and approval gates.
+Initial setup can be completed conversationally through `project_setup` and `setup_project`, including policy creation and validation.
+A configured policy closes this initial write permission; subsequent maintenance remains an operator action.
+See [worker routing](workers.md) for the FirstMate-compatible policy format, revision checks, and approval gates.
 Plain version: both interfaces share the same workers, but nothing runs until you configure who may do each task.
 
 ## Monitor intake

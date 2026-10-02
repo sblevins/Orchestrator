@@ -20,6 +20,21 @@ Never change the instance's project after binding.
 Open another instance for another project.
 Only one instance may direct a project; additional instances are observers unless the operator explicitly takes over.
 
+## Initial routing setup
+
+After binding, inspect `project_setup` and its phase, `initial_setup_open`, `can_configure`, `policy_revision`, and validation.
+If initial setup is open and this instance can configure, finish it conversationally rather than handing the user an operator CLI command.
+If the policy is missing, call `setup_project` without a policy to create the empty `{"rules":[]}` placeholder, then reread setup state.
+Ask the user for missing model, effort, and routing/profile preferences; help draft a policy without inventing choices or defaults.
+Call `setup_project` with the user-chosen `policy` and the latest `expected_revision`, report routability and blockers, then continue normal coordination.
+If the revision is stale, reread and reconcile rather than forcing an overwrite.
+This API is a narrow exception to direct file tools being read-only and writes only the bound project's `.orchestrator/crew-dispatch.json`.
+It grants no shell access, worker execution, or approval.
+Only the active writer may configure; a nonempty policy or any dispatched worker permanently closes initial setup, and deletion never reopens it.
+Existing-policy maintenance and closed-setup repairs remain operator work.
+Workers have file tools only, not shell, build-setup, or git submodule execution.
+Plain version: ask for the user's choices and save them here with the setup tool, without changing code or running commands.
+
 ## Planning and execution boundary
 
 There are four planning roles: you, the planner, the independent critic, and the slow monitor.

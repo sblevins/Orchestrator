@@ -12,7 +12,28 @@ Plain version: background jobs are available, but you must choose their model po
 
 ## Configure project policy
 
-Register and bind the project first, then initialize its policy:
+Register and bind the project, then ask the coordinator to complete initial setup.
+The bind response includes setup state; no shell command or separate operator terminal is needed for this stage.
+The coordinator uses `project_setup` to inspect the phase, policy revision, and validation, and `setup_project` to create or fill the policy.
+It asks for missing worker models, effort levels, and routing preferences, and saves the choices you approve rather than inventing profiles.
+Plain version: the coordinator can finish its own setup instead of handing the work back to you.
+
+Calling `setup_project` without a policy creates only the empty `{"rules": []}` placeholder, idempotently.
+Calling it with `policy` and the current `expected_revision` validates and saves the initial configuration at the bound project's fixed policy path.
+Changes visible at either revision check require rereading rather than overwriting them.
+Setup calls serialize through the shared database; manual editors do not share that lock.
+The revision check is not atomic filesystem compare-and-swap against arbitrary external writers, so do not manually edit the policy while conversational setup is saving it.
+Plain version: use chat setup or manual editing, not both at the same time.
+A nonempty initial policy must contain at least one currently executable profile with explicit model and effort; invalid or entirely blocked choices are rejected before saving.
+Validation does not test live model access or approve execution.
+
+This setup write is limited to the active coordinator and the policy file; observers, displaced sessions, shell commands, source edits, and arbitrary paths do not receive this permission.
+An existing configured policy, a successful setup save, or a dispatched worker closes initial setup permanently for that project.
+Removing the file afterward does not reopen it.
+Later policy changes retain the operator workflow and existing policy-refresh/approval gates.
+The program never commits the policy, edits `.gitignore`, or changes Git's exclude settings for you.
+
+Manual setup remains optional:
 
 ```bash
 bin/orchestrator routing init --project PROJECT_ID
@@ -95,7 +116,9 @@ Read workers inspect the project with read tools only.
 Read workers with accepted dependency commits receive a prepared isolated checkout containing those changes, not the unchanged source checkout.
 Write workers require a clean Git repository root and receive a separate worktree and branch created by the supervisor.
 There is no automatic stash or source-branch modification.
-Commit or ignore the project policy file before requesting write work, so its presence does not make the source checkout dirty.
+The sole cleanliness exception is an untracked, regular `.orchestrator/crew-dispatch.json` setup file.
+You do not need to commit or ignore that file just to start a worker.
+Tracked policy changes, other untracked files, source changes, and unsafe policy paths still block preparation.
 Accepted prerequisite commits can be merged into the isolated worker checkout to supply dependency changes; this never integrates a candidate into the source branch.
 Unsupported Git filters, merge drivers, unsafe paths, or provenance changes block preparation or capture.
 
