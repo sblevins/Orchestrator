@@ -11,14 +11,14 @@ from .config import load_config
 from .store import StateError, Store
 
 CONTEXT_LIMIT = 9000
+STARTUP_CONTEXT_LIMIT = 24000
 TEXT_LIMIT = 4000
 READ_ONLY = {"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch"}
 
 
 def _context(event, text):
-    return {
-        "hookSpecificOutput": {"hookEventName": event, "additionalContext": text[:CONTEXT_LIMIT]}
-    }
+    limit = STARTUP_CONTEXT_LIMIT if event == "SessionStart" else CONTEXT_LIMIT
+    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text[:limit]}}
 
 
 def _pending(store, session_id):

@@ -1,7 +1,12 @@
 """Validated, layered configuration for the local supervisor."""
 
+import contextlib
+import hashlib
+import json
 import math
+import os
 import re
+import stat
 import tomllib
 from copy import deepcopy
 from pathlib import Path
@@ -108,6 +113,13 @@ def validate_config(config: dict) -> None:
     """Validate required structure and safety limits without model-name enums."""
     if not isinstance(config, dict):
         _fail("config must be a table")
+    if "permissions" in config:
+        permissions = _table(config, "permissions")
+        choices = {"coordinator_approvals", "require_write_approval", "enforce_monitor_holds"}
+        if set(permissions) - choices:
+            _fail("permissions supports only: " + ", ".join(sorted(choices)))
+        if any(type(value) is not bool for value in permissions.values()):
+            _fail("permissions settings must be booleans")
     supervisor = _table(config, "supervisor")
     for key in ("poll_seconds", "heartbeat_seconds", "stale_seconds", "monitor_interval_seconds"):
         _number(supervisor.get(key), f"supervisor.{key}", 0.1, 86400)
@@ -130,6 +142,19 @@ def validate_config(config: dict) -> None:
             "planning.workflow must be a safe identifier: 1-128 ASCII letters, digits, "
             "underscores or hyphens, beginning with a letter or digit"
         )
+    if "templates" in planning:
+        from .graphs import validate_plan
+
+        templates = _table(planning, "templates", "planning")
+        if len(templates) > 64:
+            _fail("planning.templates supports at most 64 templates")
+        for name, template in templates.items():
+            if not isinstance(name, str) or not SAFE_IDENTIFIER.fullmatch(name):
+                _fail(f"planning.templates.{name}: template name must be a safe identifier")
+            try:
+                validate_plan(template)
+            except (ValueError, TypeError) as error:
+                _fail(f"planning.templates.{name}: {error}")
     _number(planning.get("max_review_rounds"), "planning.max_review_rounds", 1, 100, True)
     execution = _table(config, "execution")
     _number(execution.get("max_parallel"), "execution.max_parallel", 1, 64, True)
@@ -262,10 +287,69 @@ def load_config(home: Path, project_id: str | None = None) -> dict:
         if project_id is not None:
             project_path = _private_path(home, f"config/projects/{project_id}.toml")
             config = _merge(config, _read(project_path, optional=True))
+            override, _ = read_project_override(home, project_id)
+            config = _merge(config, override)
         validate_config(config)
         return config
     except (OSError, RuntimeError) as error:
         raise ConfigurationError(f"cannot resolve configuration path: {error}") from error
+
+
+PROJECT_SETTINGS_LIMIT = 1024 * 1024
+
+
+@contextlib.contextmanager
+def project_config_directory(home, project_id, *, create=False):
+    """Open the private directory without traversing any symlink components."""
+    if not isinstance(project_id, str) or not PROJECT_ID.fullmatch(project_id):
+        _fail("Invalid bound project identifier")
+    path = Path(os.path.abspath(home)) / "config" / "projects"
+    with contextlib.ExitStack() as stack:
+        directory = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+        stack.callback(os.close, directory)
+        for index, component in enumerate(path.parts[1:], start=1):
+            if create and index >= len(path.parts) - 2:
+                with contextlib.suppress(FileExistsError):
+                    os.mkdir(component, mode=0o700, dir_fd=directory)
+            directory = os.open(
+                component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+            )
+            stack.callback(os.close, directory)
+        yield directory
+
+
+def _json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            _fail(f"Duplicate project setting: {key}")
+        result[key] = value
+    return result
+
+
+def read_project_override(home, project_id):
+    """Read a bounded regular JSON override and its content revision."""
+    try:
+        with project_config_directory(home, project_id) as directory:
+            descriptor = os.open(
+                project_id + ".json",
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=directory,
+            )
+            with os.fdopen(descriptor, "rb") as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    _fail("Project settings must be a regular file")
+                raw = source.read(PROJECT_SETTINGS_LIMIT + 1)
+        if len(raw) > PROJECT_SETTINGS_LIMIT:
+            _fail("Project settings exceed 1 MiB")
+        settings = json.loads(raw, object_pairs_hook=_json_object)
+        if not isinstance(settings, dict):
+            _fail("Project settings must be an object")
+        return settings, hashlib.sha256(raw).hexdigest()
+    except FileNotFoundError:
+        return {}, "missing"
+    except (OSError, ValueError, RecursionError) as error:
+        raise ConfigurationError(f"Cannot read project settings: {error}") from error
 
 
 def role_config(config: dict, role: str) -> dict:

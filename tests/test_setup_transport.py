@@ -117,14 +117,16 @@ class SetupTransportTests(unittest.TestCase):
                 self.assertFalse(configured["execution_authorized"])
                 self.assertTrue(operation("routing_policy")["available"])
                 self.assertEqual(operation("status")["setup"]["phase"], "configured")
-                self.assertIn(
-                    "setup is complete",
-                    operation(
-                        "setup_project",
-                        {"policy": policy, "expected_revision": configured["policy_revision"]},
-                        failure=True,
-                    ),
+                updated = operation(
+                    "setup_project",
+                    {"policy": policy, "expected_revision": configured["policy_revision"]},
                 )
+                self.assertTrue(updated["can_configure"])
+                preferences = operation(
+                    "configure_project",
+                    {"settings": {"roles": {"monitor": {"model": "Opus", "effort": "max"}}}},
+                )
+                self.assertIn("revision", preferences)
                 self.assertEqual((project / "source.txt").read_text(), "unchanged source")
                 self.assertFalse((project / ".gitignore").exists())
                 self.assertEqual(store.tasks(), [])

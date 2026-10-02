@@ -8,6 +8,8 @@ Plain version: models propose and perform work, while software remembers it and 
 
 ## Implemented
 
+This section describes integration commit `c45f31f`; the tested replacement behavior awaiting activation is listed under In flight.
+
 The local Python/SQLite foundation supports project/session ownership, notes, durable events and inboxes, graph validation/readiness, planner-to-critic handoff, bounded revisions, monitor review cursors, blocking holds, and explicit operator approval.
 Detached resource-reserved runners have deadlines, cancellation, process-identity checks, strict result parsing, and restart reconciliation.
 Claude Code hooks/MCP and the owned Pi extension share this state.
@@ -49,7 +51,9 @@ See [worker visibility](worker-visibility.md) for reattachment and installed UI 
 
 ## Validation
 
-Last verified 2026-10-01: all 311 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
+Integration commit `c45f31f` last passed 311 tests on 2026-10-01.
+The pending flexible-project-routing branch passed all 347 tests on 2026-10-01 under a `machine-resources` reservation with resource warnings treated as errors.
+Ruff lint/format and `git diff --check` also passed for that branch.
 The suite includes real CLI worker selection/approval/acceptance, monitor-owned planned dispatch, dependency gating, signed isolated write results, and local Pi SDK tests against a loopback-only fake provider.
 Family tests cover a real CLI-to-worker run with a fake harness, installed Pi startup, numeric ordering, exact-pin preservation, provider boundaries, reload behavior, and fenced model-usage records.
 Onboarding tests reproduce the original block through real MCP/hook processes, exercise initial setup and permanent closure, and verify signed workspace preparation with untracked setup metadata.
@@ -86,5 +90,12 @@ Quota-dependent policy must wait for supported evidence or an explicit operator 
 
 ## In flight
 
-No unfinished implementation worktree or open pull request remains in the current repository evidence.
-Live provider and interactive acceptance checks remain pending as listed above.
+`feature/flexible-project-routing` is implemented and locally verified in `worktrees/flexible-project-routing`, based on current `origin/main`.
+It removes permanent setup locks, adds bound-project settings and conversational approvals, separates classification-based models from coordinator-chosen difficulty, and runs durable two-round read-only comparison teams.
+Project configuration writes never modify another project's settings or shared defaults.
+Tests cover four different fixture models across eight real offline runner jobs, a pinned code baseline after source HEAD changes, complete peer report exchange, cancellation, restart, and parent-only acceptance.
+Independent review found and prompted fixes for monitor classification authority and approval responses after committed state changes.
+No paid provider calls were made.
+Activation is pending because the existing supervisor (PID `3215998`, reservation `424de9`, directory `~/Agents/Orchestrator`) still runs old code; it and the native frontend must be restarted for the schema/tool upgrade.
+The live processes and the root checkout's unrelated startup-warning edit remain untouched.
+Plain version: the changes pass local checks, but the current running coordinator has not been upgraded.

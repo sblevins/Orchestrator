@@ -190,9 +190,9 @@ def bootstrap(
     )
     instructions += (
         f"\nCoordinator instance: {session_id}. Use shared tools to select/register and bind one project, "
-        "then load its notes, status, and updates. Inspect project_setup and complete open initial setup "
+        "then load its notes, status, and updates. Inspect project_setup and configure the project "
         "conversationally with setup_project before requesting workers; ask for missing user choices, "
-        "never invent defaults or hand initial setup to an operator CLI. "
+        "never invent defaults or hand project configuration to an operator CLI. "
         "Request workers only through authorized Orchestrator tools. "
         "Saved worker records do not imply that workers appear in the native sub-agent view. "
         "Describe only the visibility integration actually available in this frontend. "

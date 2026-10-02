@@ -1,4 +1,4 @@
-"""Initial project configuration without granting a coordinator shell or source writes."""
+"""Project policy configuration without granting a coordinator shell or source writes."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _session(database, session_id, *, writer=False):
     if not session or not session["active"] or not session["project_id"]:
         raise StateError("Project setup requires an active, bound session")
     if writer and session["observer"]:
-        raise StateError("Only the active project coordinator may configure initial setup")
+        raise StateError("Only the active project coordinator may configure the project")
     project = database.execute(
         "SELECT * FROM projects WHERE id=?", (session["project_id"],)
     ).fetchone()
@@ -72,7 +72,9 @@ def _snapshot(database, store, session, project):
             policy, source = inherited["policy"], inherited["source"]
         except RoutingError as failure:
             error = str(failure)
-    configured = policy is not None and bool(policy.get("rules") or "default" in policy)
+    configured = policy is not None and bool(
+        policy.get("rules") or policy.get("classifications") or "default" in policy
+    )
     closed = bool(
         database.execute("SELECT 1 FROM service WHERE key=?", (_key(project["id"]),)).fetchone()
     )
@@ -82,8 +84,7 @@ def _snapshot(database, store, session, project):
             (project["id"],),
         ).fetchone()
     )
-    # Observing an existing configuration also closes bootstrap permanently, so deleting
-    # a policy cannot reopen elevated setup permissions later in this project.
+    # Keep historical bootstrap status informational, never an authorization seal.
     if configured or dispatched:
         _complete(database, project["id"])
         closed = True
@@ -95,7 +96,7 @@ def _snapshot(database, store, session, project):
         if closed
         else "needs_configuration",
         "initial_setup_open": not closed,
-        "can_configure": not closed and not bool(session["observer"]),
+        "can_configure": bool(session["active"]) and not bool(session["observer"]),
         "policy_path": str(path),
         "policy_source": source,
         "policy_revision": revision,
@@ -104,13 +105,10 @@ def _snapshot(database, store, session, project):
         "validation": policy_readiness(policy) if policy is not None else None,
         "execution_authorized": False,
         "next_step": (
-            "Worker policy is configured. Use routing_policy and normal selection/approval tools."
-            if configured
-            else "Initial setup is closed. Repair policy through the operator workflow; no automatic reopening."
-            if closed
-            else "Ask for the user's worker model/effort preferences, then use setup_project with policy and "
-            "expected_revision=policy_revision. To create only an empty placeholder, call setup_project "
-            "without policy. Do not require shell commands or invent worker profiles."
+            "Use setup_project to save or repair worker preferences at any time. "
+            "Optionally pass expected_revision=policy_revision to detect stale edits. "
+            "Incomplete preferences are saved as drafts; inspect validation blockers before dispatch. "
+            "Changes apply to new tasks, not running work. Do not invent worker profiles."
         ),
     }
 
@@ -185,41 +183,27 @@ def _write_policy(root, text, *, expected_revision):
 
 
 def setup_project(store, session_id, policy=None, expected_revision=None):
-    """Create/fill initial routing configuration; never approve, execute, or edit source."""
+    """Save a project-local policy or draft; never approve, execute, or edit source."""
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str) or not expected_revision
+    ):
+        raise StateError("expected_revision must be a nonempty string")
     if policy is not None:
         policy = validate_policy(policy)
-        readiness = policy_readiness(policy)
-        if (policy.get("rules") or "default" in policy) and not readiness["routable"]:
-            raise StateError(
-                "Initial policy needs at least one executable profile with model/effort: "
-                + encode(readiness["blockers"])[:8000]
-            )
-        text = encode(policy) + "\n"
-        if len(text.encode("utf-8")) > POLICY_LIMIT:
-            raise StateError("Worker policy exceeds 1 MiB")
-        if not isinstance(expected_revision, str) or not expected_revision:
-            raise StateError(
-                "Saving worker preferences requires expected_revision from project_setup"
-            )
-    else:
-        if expected_revision is not None:
-            raise StateError("expected_revision is only used when saving a policy")
-        text = encode({"rules": []}) + "\n"
-    rejection = None
     with store.transaction() as database:
         session, project = _session(database, session_id, writer=True)
         before = _snapshot(database, store, session, project)
-        if not before["initial_setup_open"]:
-            # Commit the newly observed permanent seal even when rejecting a save.
-            # Raising inside this transaction would roll the seal back.
-            result = {**before, "changed": False}
-            if policy is not None:
-                rejection = "Initial project setup is complete; policy changes require the operator workflow"
-        elif policy is None and before["policy_revision"] != "missing":
+        if expected_revision is not None and expected_revision != before["policy_revision"]:
+            raise StateError("Worker policy changed; reread project_setup before saving")
+        if policy is None and before["policy_revision"] != "missing":
             result = {**before, "changed": False}
         else:
-            if policy is not None and expected_revision != before["policy_revision"]:
-                raise StateError("Worker policy changed; reread project_setup before saving")
+            saved_policy = policy if policy is not None else before["policy"]
+            if saved_policy is None:
+                saved_policy = {"rules": []}
+            text = encode(saved_policy) + "\n"
+            if len(text.encode("utf-8")) > POLICY_LIMIT:
+                raise StateError("Worker policy exceeds 1 MiB")
             _write_policy(project["root"], text, expected_revision=before["policy_revision"])
             result = _snapshot(database, store, session, project)
             store._event(
@@ -236,6 +220,4 @@ def setup_project(store, session_id, policy=None, expected_revision=None):
                 review_required=result["phase"] == "configured",
             )
             result = {**result, "changed": True}
-    if rejection:
-        raise StateError(rejection)
     return result

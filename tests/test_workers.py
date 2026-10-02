@@ -18,6 +18,7 @@ REPORT = {"summary": "Done", "changes": [], "checks": ["Read input"], "remaining
 CONFIG = {
     "workers": {"enabled": True},
     "routing": {"enabled": True},
+    "permissions": {"require_write_approval": True},
     "execution": {"max_parallel": 3, "dependency_failure": "block"},
 }
 
@@ -186,7 +187,7 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(StateError):
             self.workers.accept(request["id"], "Replay")
 
-    def test_write_requires_operator_and_provenance(self):
+    def test_configured_write_approval_requires_authorization_and_provenance(self):
         request = self.selected("write")
         self.workers.dispatch_ready()
         self.assertIsNone(self.workers.get(request["id"])["task_id"])
@@ -210,16 +211,15 @@ class WorkerTests(unittest.TestCase):
         self.assertIsNone(refreshed["approval"])
         self.assertIsNone(refreshed["profile"])
 
-    def test_policy_change_after_queue_prevents_claim(self):
+    def test_policy_change_after_queue_preserves_captured_selection(self):
         request = self.selected()
         self.workers.dispatch_ready()
         self.policy_path.write_text(encode({"default": {**PROFILE, "effort": "low"}}))
-        self.assertIsNone(self.store.claim_next(3))
-        self.assertEqual(
-            self.store.task(self.workers.get(request["id"])["task_id"])["state"], "cancelled"
-        )
+        task = self.store.claim_next(3)
+        self.assertEqual(task["config"]["worker"]["profile"]["effort"], "high")
+        self.assertEqual(task["worker_request_id"], request["id"])
 
-    def test_hold_pause_and_policy_change_revoke_live_gate(self):
+    def test_pause_revokes_live_gate_but_policy_changes_are_for_new_tasks(self):
         request = self.selected()
         task = self.launch(request)
         self.assertTrue(self.store.runner_started(task["id"], task["token"], 123, "identity"))
@@ -229,7 +229,7 @@ class WorkerTests(unittest.TestCase):
             self.workers.start_check(task)
         self.store.resume("project")
         self.policy_path.write_text(encode({"default": {**PROFILE, "effort": "low"}}))
-        self.assertFalse(self.store.heartbeat(task["id"], task["token"]))
+        self.assertTrue(self.store.heartbeat(task["id"], task["token"]))
 
     def test_arbitrary_enqueue_and_replay_are_rejected(self):
         request = self.selected()
@@ -280,8 +280,9 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(StateError):
             self.request()
         request = self.workers.list("project")[0]
-        with self.assertRaises(StateError):
-            self.workers.select("session", request["id"], CHOICE)
+        selected = self.workers.select("session", request["id"], CHOICE)
+        self.assertEqual(selected["plan_id"], request["plan_id"])
+        self.assertEqual(selected["selection_source"], "foreground")
 
     def test_reverse_origin_relabel_is_rejected(self):
         self.request()
@@ -402,6 +403,32 @@ class WorkerTests(unittest.TestCase):
         self.workers.process_result(self.store.task(task["id"]))
         self.assertEqual(self.workers.get(request["id"])["state"], "failed")
 
+    def test_monitor_classification_cannot_choose_coordinator_effort(self):
+        self.policy_path.write_text(encode({"classifications": {"audit": PROFILE}}))
+        self.plan()
+        requests = self.workers.list("project")
+        task, report = self.monitor(
+            selections=[
+                {
+                    "request_id": requests[0]["id"],
+                    "choice": {
+                        "classification": "audit",
+                        "difficulty": "very-hard",
+                        "rationale": "Advisory",
+                    },
+                }
+            ]
+        )
+        self.apply(task, report)
+        self.assertEqual(self.workers.get(requests[0]["id"])["state"], "pending")
+        self.assertTrue(self.store.task(task["id"])["processed"])
+        self.assertTrue(
+            any(
+                event["kind"] == "worker.routing_recommended"
+                for event in self.store.updates("session")
+            )
+        )
+
     def test_captain_rule_requires_extra_approval(self):
         self.policy_path.write_text(
             encode({"rules": [{"when": "Any work", "use": PROFILE, "approval": "captain"}]})
@@ -463,7 +490,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(store.updates("session")[0]["id"], 1)
             self.assertEqual(store.read_note("project", "BRIEF.md")["text"], "Keep notes")
             with store.transaction() as database:
-                self.assertEqual(database.execute("PRAGMA user_version").fetchone()[0], 2)
+                self.assertEqual(database.execute("PRAGMA user_version").fetchone()[0], 3)
                 self.assertEqual(database.execute("PRAGMA foreign_key_check").fetchall(), [])
                 self.assertEqual(database.execute("PRAGMA integrity_check").fetchone()[0], "ok")
 

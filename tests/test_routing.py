@@ -167,7 +167,7 @@ class RoutingTests(unittest.TestCase):
         result["model"] = "changed"
         self.assertEqual(self.policy, original_policy)
         self.assertEqual(self.choice, original_choice)
-        for field in ("rule", "model", "effort", "rationale"):
+        for field in ("rule", "rationale"):
             choice = {key: value for key, value in self.choice.items() if key != field}
             with self.subTest(field=field), self.assertRaises(RoutingError):
                 resolve_selection(self.policy, choice)
@@ -177,7 +177,6 @@ class RoutingTests(unittest.TestCase):
             ("candidate", True),
             ("candidate", -1),
             ("model", "other"),
-            ("effort", "low"),
             ("provider", "other"),
             ("harness", "claude"),
         ):
@@ -208,11 +207,10 @@ class RoutingTests(unittest.TestCase):
                     {**self.choice, "effort": effort},
                 )
 
-    def test_claude_max_requires_explicit_preference(self):
+    def test_claude_max_is_coordinator_controlled(self):
         profile = {"harness": "claude", "model": "claude-test"}
         choice = {**self.choice, "model": "claude-test", "effort": "max"}
-        with self.assertRaisesRegex(RoutingError, "explicit policy preference"):
-            resolve_selection({"default": profile}, choice)
+        self.assertEqual(resolve_selection({"default": profile}, choice)["effort"], "max")
         self.assertEqual(
             resolve_selection({"default": {**profile, "effort": "max"}}, choice)["effort"], "max"
         )

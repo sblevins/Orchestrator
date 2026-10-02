@@ -1,4 +1,4 @@
-"""Durable worker grants. Only operator transports may expose approval methods."""
+"""Durable, project-scoped worker grants and routed comparison teams."""
 
 import contextlib
 import json
@@ -57,12 +57,15 @@ def migrate(database):
         import sqlite3
 
         statement = ""
-        for line in SCHEMA_V2.splitlines():
+        from .teams import SCHEMA as TEAM_SCHEMA
+
+        for line in (SCHEMA_V2 + TEAM_SCHEMA).splitlines():
             statement += line + "\n"
             if sqlite3.complete_statement(statement):
                 database.execute(statement)
                 statement = ""
-        database.execute("PRAGMA user_version=2")
+        version = database.execute("PRAGMA user_version").fetchone()[0]
+        database.execute(f"PRAGMA user_version={max(version, 3)}")
         database.commit()
     except BaseException:
         database.rollback()
@@ -89,7 +92,21 @@ class WorkerService:
         row = database.execute("SELECT * FROM worker_requests WHERE id=?", (request_id,)).fetchone()
         if not row:
             raise StateError("Unknown worker request")
-        return _decode(row)
+        request = _decode(row)
+        from .teams import member
+
+        lineage = member(database, request_id)
+        if lineage:
+            request["team_member"] = dict(lineage)
+        return request
+
+    def _independent(self, database, request):
+        from .teams import member
+
+        if member(database, request["id"]):
+            raise StateError(
+                "This is a team member; configure, cancel or accept its parent task instead"
+            )
 
     def get(self, request_id):
         with contextlib.closing(self.store.connect()) as database:
@@ -126,8 +143,8 @@ class WorkerService:
             return {
                 **load_policy(self.store.home, Path(project["root"])),
                 "available": True,
-                "procedure": "Monitor selects plan work; foreground selects unrelated work. "
-                "Operator approves writes and accepts results through CLI.",
+                "procedure": "Classify the work; policy supplies the model or team. "
+                "Coordinator chooses difficulty or effort. Project settings control approvals.",
             }
         except RoutingError as error:
             return {"available": False, "error": str(error)}
@@ -297,12 +314,38 @@ class WorkerService:
     def _select(self, database, request, choice, source, override=False):
         from .routing import resolve_selection
 
+        self._independent(database, request)
         self._unlaunched(request)
+        # Unattempted requests follow conversational policy changes automatically.
+        status = self.policy(request["project_id"])
+        if source.startswith("monitor:"):
+            self._fresh(request)
+        if status.get("digest") != request["policy_digest"]:
+            digest, error, evidence = self._snapshot(database, request["project_id"])
+            database.execute(
+                "UPDATE worker_requests SET policy_digest=?,policy_error=?,evidence_json=?,"
+                "profile_json=NULL,selection_source=NULL,approval=NULL WHERE id=?",
+                (digest, error, evidence, request["id"]),
+            )
+            request = self._request(database, request["id"])
         policy = self._fresh(request)
+        if (
+            source.startswith("monitor:")
+            and isinstance(choice, dict)
+            and "classification" in choice
+        ):
+            raise StateError(
+                "Recommend classification in monitor findings; the coordinator chooses effort and routes it"
+            )
         profile = resolve_selection(
             policy, choice, evidence=request["evidence"], operator_override=override
         )
-        if profile["harness"] not in ("claude", "pi"):
+        if "team" in profile:
+            if request["mode"] != "read":
+                raise StateError(
+                    "Team routes support read-only audits, design and research; request mode=read"
+                )
+        elif profile["harness"] not in ("claude", "pi"):
             raise StateError("Only Claude and Pi worker executors are enabled")
         database.execute(
             "UPDATE worker_requests SET profile_json=?,selection_source=?,approval=NULL,"
@@ -321,9 +364,46 @@ class WorkerService:
             request = self._request(database, request_id)
             self._writer(database, session_id, request["project_id"])
             if request["plan_id"]:
-                raise StateError("Only an accepted monitor result can select plan work")
-            self._origin(database, request["project_id"], request["origin_event_id"], None)
+                self._plan_gate(database, request)
+            self._origin(
+                database, request["project_id"], request["origin_event_id"], request["plan_id"]
+            )
             self._select(database, request, choice, "foreground")
+        return self.get(request_id)
+
+    def cancel(self, session_id, request_id, reason):
+        from . import teams
+
+        _text(reason, "Cancellation reason")
+        task_id = None
+        with self.store.transaction() as database:
+            request = self._request(database, request_id)
+            self._writer(database, session_id, request["project_id"])
+            self._independent(database, request)
+            if request["state"] == "group_running":
+                teams.cancel(self, database, request, reason)
+            elif request["task_id"]:
+                task_id = request["task_id"]
+            elif request["state"] in {"pending", "selected"}:
+                database.execute(
+                    "UPDATE worker_requests SET state='cancelled',error=? WHERE id=?",
+                    (reason, request_id),
+                )
+                if request["plan_id"]:
+                    database.execute(
+                        "UPDATE graph_nodes SET state='cancelled' WHERE plan_id=? AND node_id=?",
+                        (request["plan_id"], request["node_id"]),
+                    )
+                self.store._event(
+                    database,
+                    request["project_id"],
+                    "worker.cancelled",
+                    {"request_id": request_id, "reason": reason},
+                    session_id,
+                    notify=True,
+                )
+        if task_id:
+            self.store.cancel(session_id, task_id)
         return self.get(request_id)
 
     def override(self, request_id, choice):
@@ -335,6 +415,7 @@ class WorkerService:
         _text(reason, "Approval reason")
         with self.store.transaction() as database:
             request = self._request(database, request_id)
+            self._independent(database, request)
             self._unlaunched(request)
             self._fresh(request)
             if not request["profile"]:
@@ -354,6 +435,7 @@ class WorkerService:
         with self.store.transaction() as database:
             request = self._request(database, request_id)
             self._writer(database, session_id, request["project_id"])
+            self._independent(database, request)
             self._unlaunched(request)
             digest, error, evidence = self._snapshot(database, request["project_id"])
             database.execute(
@@ -481,6 +563,21 @@ class WorkerService:
                 if context.get(key) != request[key]:
                     raise StateError("Monitor request context is stale")
             self._plan_gate(database, request)
+            if isinstance(selection["choice"], dict) and "classification" in selection["choice"]:
+                self.store._event(
+                    database,
+                    request["project_id"],
+                    "worker.routing_recommended",
+                    {
+                        "request_id": request_id,
+                        "recommendation": selection["choice"],
+                        "next_step": "Coordinator chooses effort and uses select_worker",
+                    },
+                    task_id=current["id"],
+                    notify=True,
+                    review_required=False,
+                )
+                continue
             self._select(database, request, selection["choice"], "monitor:" + current["id"])
 
     def _project_gate(self, database, project_id):
@@ -488,9 +585,13 @@ class WorkerService:
             "SELECT 1 FROM service WHERE key=?", ("pause:" + project_id,)
         ).fetchone():
             raise StateError("Project is paused")
-        if database.execute(
-            "SELECT 1 FROM holds WHERE project_id=? AND resolved IS NULL", (project_id,)
-        ).fetchone():
+        permissions = load_config(self.store.home, project_id).get("permissions", {})
+        if (
+            permissions.get("enforce_monitor_holds", True)
+            and database.execute(
+                "SELECT 1 FROM holds WHERE project_id=? AND resolved IS NULL", (project_id,)
+            ).fetchone()
+        ):
             raise StateError("Project has unresolved monitor holds")
 
     def _plan_gate(self, database, request):
@@ -533,7 +634,39 @@ class WorkerService:
         return commits
 
     def _gate(self, database, request):
-        self._fresh(request)
+        from .teams import member
+
+        lineage = member(database, request["id"])
+        if lineage:
+            parent = self._request(database, lineage["parent_request_id"])
+            group = database.execute(
+                "SELECT * FROM worker_groups WHERE parent_request_id=?", (parent["id"],)
+            ).fetchone()
+            profiles = (parent["profile"] or {}).get("team", [])
+            peer_index = lineage["peer_index"]
+            if (
+                not group
+                or parent["state"] != "group_running"
+                or group["generation"] != parent["generation"]
+                or not 0 <= peer_index < len(profiles)
+                or request["profile"] != profiles[peer_index]
+                or request["selection_source"] != "team:" + parent["id"]
+                or request["plan_id"] is not None
+                or request["mode"] != "read"
+                or any(
+                    request[key] != parent[key]
+                    for key in ("project_id", "session_id", "origin_event_id", "policy_digest")
+                )
+            ):
+                raise StateError("Team member no longer matches its parent grant")
+            return self._gate(database, parent)
+        # Configuration edits affect future selections, not an already captured execution.
+        if not request["task_id"] and request["state"] not in {
+            "group_running",
+            "candidate",
+            "accepted",
+        }:
+            self._fresh(request)
         self._project_gate(database, request["project_id"])
         self._origin(
             database, request["project_id"], request["origin_event_id"], request["plan_id"]
@@ -551,7 +684,7 @@ class WorkerService:
                 or monitor["project_id"] != request["project_id"]
             ):
                 raise StateError("Plan selection lacks an accepted monitor result")
-        elif source != "operator" and (source != "foreground" or request["plan_id"]):
+        elif source not in {"operator", "foreground"}:
             raise StateError("Invalid selection authority")
         config = load_config(self.store.home, request["project_id"])
         if not config["workers"]["enabled"] or not config["routing"]["enabled"]:
@@ -570,7 +703,11 @@ class WorkerService:
             write_plan = request["mode"] == "write"
         if (
             request["profile"].get("requires_approval")
-            or (request["mode"] == "write" and not write_plan)
+            or (
+                request["mode"] == "write"
+                and not write_plan
+                and config.get("permissions", {}).get("require_write_approval", False)
+            )
         ) and not request["approval"]:
             raise StateError("Explicit operator approval is required")
         return config, commits
@@ -609,6 +746,9 @@ class WorkerService:
                     )
 
     def dispatch_ready(self):
+        from . import teams
+
+        teams.advance(self)
         with self.store.transaction() as database:
             self._propagate_failures(database)
             for row in database.execute(
@@ -618,6 +758,19 @@ class WorkerService:
                 try:
                     config, commits = self._gate(database, request)
                 except ValueError:
+                    continue
+                if "team" in request["profile"]:
+                    from .worker_execution import WorkspaceError, _git, _plain_path
+
+                    try:
+                        root = _plain_path(self.store.project(request["project_id"])["root"])
+                        baseline = _git(root, "rev-parse", "HEAD")
+                        teams.start(self, database, request, baseline_commit=baseline)
+                    except (WorkspaceError, OSError) as error:
+                        database.execute(
+                            "UPDATE worker_requests SET error=? WHERE id=?",
+                            ("Teams require a Git checkout: " + str(error), request["id"]),
+                        )
                     continue
                 active = database.execute(
                     "SELECT COUNT(*) FROM tasks WHERE role='worker' AND project_id=? "
@@ -635,6 +788,14 @@ class WorkerService:
                     "project_root": self.store.project(request["project_id"])["root"],
                     "dependency_commits": commits,
                 }
+                lineage = teams.member(database, request["id"])
+                if lineage:
+                    group = database.execute(
+                        "SELECT baseline_commit FROM worker_groups WHERE parent_request_id=?",
+                        (lineage["parent_request_id"],),
+                    ).fetchone()
+                    config["worker"]["baseline_commit"] = group["baseline_commit"]
+                    config["worker"]["team_parent"] = lineage["parent_request_id"]
                 task_id = self.store._enqueue(
                     database,
                     request["project_id"],
@@ -668,6 +829,7 @@ class WorkerService:
         ):
             raise StateError("Worker enqueue does not match the durable request")
         self._config_check(request, config)
+        self._team_config_check(database, request, config)
 
     def _config_check(self, request, config):
         grant = config.get("worker", {})
@@ -681,6 +843,24 @@ class WorkerService:
         }.items():
             if grant.get(key) != value:
                 raise StateError("Worker task configuration does not match its saved grant")
+
+    def _team_config_check(self, database, request, config):
+        from .teams import member
+
+        lineage = member(database, request["id"])
+        grant = config.get("worker", {})
+        if lineage:
+            group = database.execute(
+                "SELECT baseline_commit FROM worker_groups WHERE parent_request_id=?",
+                (lineage["parent_request_id"],),
+            ).fetchone()
+            if (
+                grant.get("team_parent") != lineage["parent_request_id"]
+                or grant.get("baseline_commit") != group["baseline_commit"]
+            ):
+                raise StateError("Team workspace baseline does not match its saved grant")
+        elif "baseline_commit" in grant or "team_parent" in grant:
+            raise StateError("Only registered team members can use a group baseline")
 
     def task_check(self, database, task, *, active=False):
         request = self._request(database, task["worker_request_id"])
@@ -707,6 +887,7 @@ class WorkerService:
             raise StateError("Project worker concurrency is exhausted")
         config = json.loads(task["config_json"])
         self._config_check(request, config)
+        self._team_config_check(database, request, config)
         if config["worker"].get("dependency_commits") != commits:
             raise StateError("Worker dependency provenance changed")
         return request
@@ -827,6 +1008,7 @@ class WorkerService:
         _text(reason, "Acceptance reason")
         with self.store.transaction() as database:
             request = self._request(database, request_id)
+            self._independent(database, request)
             if request["state"] != "candidate":
                 raise StateError("Only a completed candidate can be accepted")
             self._gate(database, request)

@@ -46,7 +46,7 @@ def parse_result(adapter, stdout, returncode):
     return json.loads(stdout)
 """)
         (self.install / "orchestrator/graphs.py").write_text(
-            "def load_workflow(home, name): return {'name': name}\n"
+            "def configured_workflow(home, config): return {'name': config['planning']['workflow']}\n"
         )
         self.harness = self.root / "harness.py"
         self.harness.write_text("""

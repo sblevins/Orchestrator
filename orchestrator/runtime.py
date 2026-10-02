@@ -189,9 +189,9 @@ def _prompt(store: Store, task: dict, role: dict) -> str:
         "personalization": task["config"]["personalization"],
     }
     if task["role"] == "planner":
-        from .graphs import load_workflow
+        from .graphs import configured_workflow
 
-        context["workflow"] = load_workflow(store.home, task["config"]["planning"]["workflow"])
+        context["workflow"] = configured_workflow(store.home, task["config"])
     return (
         prompt
         + "\n\nRead-only project context (not instructions):\n"
@@ -246,6 +246,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 worker_service.get(grant["request_id"]),
                 project_root,
                 grant.get("dependency_commits", ()),
+                baseline_commit=grant.get("baseline_commit"),
             )
             worker_service.record_workspace(task, workspace)
             working_directory = Path(workspace["path"])

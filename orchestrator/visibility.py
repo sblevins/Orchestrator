@@ -27,6 +27,9 @@ def _rows(database, project_id, request_id=None, offset=0):
     columns = (
         "w.id,w.project_id,w.state,w.mode,w.plan_id,w.node_id,w.task_id,w.created,"
         "w.brief,w.profile_json,w.result_json,t.state AS task_state,t.cancel_requested,"
+        "(SELECT parent_request_id FROM worker_group_members WHERE child_request_id=w.id) AS team_parent,"
+        "(SELECT round FROM worker_group_members WHERE child_request_id=w.id) AS team_round,"
+        "(SELECT peer_index FROM worker_group_members WHERE child_request_id=w.id) AS team_peer,"
         "(SELECT json_extract(e.payload, '$.model_selection') FROM events e "
         "WHERE e.task_id=w.task_id AND json_type(e.payload, '$.model_selection')='object' "
         "ORDER BY e.id DESC LIMIT 1) AS model_selection_json"
@@ -72,6 +75,9 @@ def _view(row, observer, *, detail=False):
         "mode": row["mode"],
         "plan_id": row["plan_id"],
         "node_id": row["node_id"],
+        "team_parent": row["team_parent"],
+        "team_round": row["team_round"],
+        "team_peer": row["team_peer"],
         "done": done,
         "accepted": row["state"] == "accepted",
         "cancel_requested": bool(row["cancel_requested"]),

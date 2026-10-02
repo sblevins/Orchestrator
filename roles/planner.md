@@ -36,7 +36,16 @@ Include every listed field, use empty lists when appropriate, and put any needed
 Every node must have verifiable acceptance criteria and an explicit dependency list, including an empty list for roots.
 Set mode to write only for work nodes that require changing project files; all other nodes are read.
 This declaration requests permission, not grants it.
-Do not add worker model choices or routing policies to the plan; the slow monitor selects planned workers after approval.
+Do not add hardcoded worker model pins, routing policies, or undeclared schema fields to the plan.
+When useful, recommend an existing configured classification in a node's description and explain the task's difficulty without making an executable selection.
+The bound coordinator selects planned and on-demand workers with final classification and effort, preserving plan origins.
+The monitor selects supplied legacy pending plan requests; classification suggestions become worker.routing_recommended notifications, not executable selections.
+For read-only audit, research, or design, a description may recommend a configured comparison team, with acceptance criteria that assess evidence and unresolved disagreements rather than require consensus.
+Teams use the same frozen Git commit and accepted dependencies for two rounds; only the parent result is accepted.
+Project-local approval preferences are configurable, so do not invent operator-only CLI gates or unnecessary approval nodes.
+Independent review, fresh monitor evidence for plan approval, dependency correctness, and checked candidate acceptance still apply.
+See docs/project-routing.md for current routing and permission behavior.
+Plain version: describe what each task needs and how to check it, and let the coordinator choose the configured workers.
 
 Use the configured personalization preferences.
 Be concise, neutral, and practical, with no pirate language.

@@ -187,11 +187,11 @@ def _metadata(path):
     return {str(file): _fingerprint(file) for file in files}
 
 
-def prepare_workspace(home, request, project_root, dependency_commits=()):
+def prepare_workspace(home, request, project_root, dependency_commits=(), *, baseline_commit=None):
     """Never stash, merge, push, or modify source files or its checked-out branch."""
     source = _plain_path(project_root)
     mode = request.get("mode")
-    if mode == "read" and not dependency_commits:
+    if mode == "read" and not dependency_commits and baseline_commit is None:
         return {"mode": "read", "path": str(source), "source": str(source)}
     if mode not in ("read", "write"):
         raise WorkspaceError("worker mode must be read or write")
@@ -213,13 +213,26 @@ def prepare_workspace(home, request, project_root, dependency_commits=()):
         not stat.S_ISREG(policy_metadata.st_mode) or policy_metadata.st_nlink != 1
     ):
         raise WorkspaceError("routing policy must be an ordinary non-linked file")
-    # Compare the entire NUL-delimited byte output, not quoted or stripped names.
-    # Only this exact untracked entry is exempt; tracked edits still fail closed.
+    # Only project routing metadata is exempt, including conversational edits to
+    # a tracked policy. The worker starts from a commit and never stages this file.
+    # Match the complete NUL-delimited output, so rename sources or extra files fail.
     status = _run(["status", "--porcelain=v1", "--untracked-files=all", "-z"], source)
-    if status and not (
-        status == b"?? .orchestrator/crew-dispatch.json\0" and policy_metadata is not None
-    ):
-        raise WorkspaceError("source checkout must be clean; no automatic stash is permitted")
+    metadata_only = status[2:] == b" .orchestrator/crew-dispatch.json\0" and status[:2] in {
+        b"??",
+        b" M",
+        b"M ",
+        b"MM",
+        b"A ",
+        b"AM",
+        b" D",
+        b"D ",
+        b"AD",
+    }
+    if status and not metadata_only:
+        raise WorkspaceError(
+            "Source code has uncommitted changes; commit those changes before creating "
+            "an isolated worker snapshot. Routing policy edits do not need a commit."
+        )
     commits = list(dependency_commits)
     if len(commits) > 100 or any(
         not isinstance(commit, str) or not COMMIT_ID.fullmatch(commit) for commit in commits
@@ -236,7 +249,11 @@ def prepare_workspace(home, request, project_root, dependency_commits=()):
         raise WorkspaceError(
             "workspace repositories with Git filters or merge drivers are unsupported"
         )
-    base = _git(source, "rev-parse", "HEAD")
+    if baseline_commit is not None and (
+        not isinstance(baseline_commit, str) or not COMMIT_ID.fullmatch(baseline_commit)
+    ):
+        raise WorkspaceError("Team baseline must be a full Git commit ID")
+    base = baseline_commit or _git(source, "rev-parse", "HEAD")
     parent = _plain_path(Path(home) / "data" / "workspaces" / request_id)
     parent.parent.mkdir(parents=True, exist_ok=True)
     parent.mkdir(mode=0o700)  # Exclusive ownership; never reuse another attempt.

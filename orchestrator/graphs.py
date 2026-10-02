@@ -300,3 +300,10 @@ def load_workflow(home: Path, name: str) -> dict:
     if override is not None:
         return override
     return _read_workflow(WORKFLOW_DIRECTORY, name)
+
+
+def configured_workflow(home: Path, config: dict) -> dict:
+    """Prefer project-layer templates without changing shared workflow files."""
+    name = config["planning"]["workflow"]
+    templates = config["planning"].get("templates", {})
+    return validate_plan(templates[name]) if name in templates else load_workflow(home, name)

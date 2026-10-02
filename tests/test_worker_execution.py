@@ -103,7 +103,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_dirty_source_not_stashed(self):
         (self.source / "file.txt").write_text("user edits")
-        with self.assertRaisesRegex(WorkspaceError, "clean"):
+        with self.assertRaisesRegex(WorkspaceError, "uncommitted"):
             self.prepare()
         self.assertEqual((self.source / "file.txt").read_text(), "user edits")
         self.assertEqual(git(self.source, "stash", "list"), "")

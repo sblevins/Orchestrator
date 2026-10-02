@@ -281,6 +281,8 @@ os.execv(args[0],args)
 
     def test_authorized_write_creates_signed_candidate_without_modifying_source(self):
         self.install_fake_harnesses()
+        with (self.home / "config/local.toml").open("a") as settings:
+            settings.write("[permissions]\nrequire_write_approval=true\n")
         self.addCleanup(self.cleanup_service)
         self.environment["ORCH_TEST_WORKER_WRITE"] = "1"
         key = self.home / "signing"

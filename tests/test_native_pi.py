@@ -121,7 +121,7 @@ for (const action of ['routing_policy', 'request_worker', 'worker', 'workers', '
 }
 assert.match(tool.description, /tracked background sub-agents/);
 assert.match(tool.description, /never Herder tabs or windows/);
-assert.match(tool.description, /operator-only/);
+assert.match(tool.description, /never global.*or another project/);
 await handlers.get('session_shutdown')({}, ctx);
 for (const invalidProvider of [undefined, '', ' ', false]) {
   entries.length = 0;

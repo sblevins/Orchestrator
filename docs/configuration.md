@@ -1,7 +1,7 @@
 # Configuration
 
 `orchestrator.config.load_config(home, project_id=None)` returns a fresh validated dictionary.
-It reads tracked `config/default.toml` relative to the installed source checkout, then optional `<home>/config/local.toml`, then optional `<home>/config/projects/<project_id>.toml`.
+It reads tracked `config/default.toml` relative to the installed source checkout, then optional `<home>/config/local.toml`, then optional `<home>/config/projects/<project_id>.toml`, then optional `<home>/config/projects/<project_id>.json`.
 Tables merge recursively; scalar values and lists replace earlier values.
 Validation applies to the final merged configuration.
 Plain version: your private settings change the defaults, and project settings change them only for that project.
@@ -26,6 +26,47 @@ Private configuration symlinks must resolve within the selected home, including 
 Configuration is trusted local administrative input, not a sandbox for someone who can modify the home concurrently.
 Plain version: use a simple project name, keep your private files private, and do not let other users change them.
 
+## Conversational project settings
+
+Read `project_settings` for effective settings, `revision`, and `can_configure`.
+The active bound coordinator can call `configure_project` with a partial `settings` object and optional `expected_revision` repeatedly.
+It recursively merges the patch, validates the effective configuration, and writes only private `<home>/config/projects/<bound-id>.json` with mode `0600` in private directories.
+It never modifies global settings, `config/local.toml`, tracked defaults, another project's settings, or the project TOML override.
+On a revision conflict, reread and reconcile rather than overwriting another change.
+Settings include roles and effort, personalization, monitoring, planning and named templates, execution, and permissions.
+Arbitrary adapter/frontend executable changes are rejected conversationally because a replacement executable can affect things outside the project and ignore safety flags.
+Existing tasks keep captured role and model settings.
+Project permissions, worker enablement, and worker concurrency are live controls.
+Native foreground model and effort changes still use `/model` and `/effort`.
+Plain version: ask for a change here, and only this project's future work uses it.
+
+For example, the `configure_project` payload can be:
+
+```json
+{
+  "settings": {
+    "roles": {"monitor": {"effort": "high"}},
+    "execution": {"max_parallel": 3},
+    "permissions": {
+      "coordinator_approvals": true,
+      "require_write_approval": false,
+      "enforce_monitor_holds": true
+    }
+  }
+}
+```
+
+Those three permission values are the defaults, and each must be a boolean.
+`coordinator_approvals` permits the bound coordinator's approval APIs; disabling it does not prevent asking to re-enable it through `configure_project`.
+`require_write_approval` adds explicit authorization for write workers when true; false does not remove explicit approval required by a routing rule.
+`enforce_monitor_holds` controls whether unresolved monitor holds block progress.
+Use `approve_plan(plan_id, reason)`, `resolve_hold(hold_id, reason)`, `approve_worker(request_id, reason)`, `accept_worker(request_id, reason)`, and `approve_node(plan_id, node_id, reason)` for authorized decisions in this project.
+Use `cancel_worker(request_id, reason)` for a worker or entire comparison team.
+Plan approval still requires independent review and fresh monitor evidence.
+Candidate results are never automatically accepted, and only a team's parent request can be accepted.
+Project ownership, dependency correctness, no blind retry of unknown outcomes, isolated source workspaces, file-tool-only workers without shell, and credential limits remain intrinsic boundaries.
+Plain version: optional permission checks are your project preferences, but workers still cannot change other projects or skip required work.
+
 ## Supervisor and personalization
 
 `supervisor` controls polling, heartbeat/stale thresholds, parallelism, monitor cadence/batching, and shared execution safeguards.
@@ -49,8 +90,11 @@ Reaching this limit does not mean the critic approved the plan.
 Tracked templates live at `workflows/<name>.json`; private replacements live at `<home>/config/workflows/<name>.json` and take precedence for that name.
 Select the name in local or project TOML to customize the workflow.
 There are no configurable template-directory or arbitrary-path settings.
-The config loader validates the selected name only; the graph module owns template loading, missing-template errors, template validation, and path containment checks.
-A valid configuration is not proof that a template exists or that its graph is valid.
+`planning.templates` optionally maps up to 64 safe names to complete plan graph objects with `summary`, `assumptions`, `risks`, `questions`, and `nodes`.
+These inline templates are validated during configuration and take precedence over file templates of the same name.
+Use `configure_project` to save them conversationally and `planning.workflow` to select one.
+For file templates, the config loader validates the selected name only; the graph module owns loading, missing-template errors, graph validation, and path containment checks.
+A valid configuration is not proof that a selected file template exists or is valid.
 Protect private workflow templates with the same file permissions as private TOML overrides.
 Plain version: choose a workflow by its short name, and put your customized version in the private workflow folder.
 The program must check that file before using it.
@@ -174,9 +218,9 @@ Use native `/model` and `/effort`, or the optional launcher, to select the confi
 `routing.rules` and `routing.first_mate` remain empty compatibility fields, not active inline policy.
 Set worker preferences in `<project-root>/.orchestrator/crew-dispatch.json`, falling back to `<home>/config/crew-dispatch.json` only when the project file is absent.
 Invalid project policy is an error, never permission to use a fallback.
-Initial setup can be completed conversationally through `project_setup` and `setup_project`, including policy creation and validation.
-A configured policy closes this initial write permission; subsequent maintenance remains an operator action.
-See [worker routing](workers.md) for the FirstMate-compatible policy format, revision checks, and approval gates.
+Routing can be created, replaced, or repaired repeatedly through `project_setup` and `setup_project(policy, expected_revision)`, with optional revision checking.
+Deleted policies and incomplete drafts do not permanently close configuration or require an operator CLI handoff.
+See [project routing](project-routing.md) for classifications, difficulty mapping, comparison teams, legacy rules/default, revision checks, and conversational approvals.
 Plain version: both interfaces share the same workers, but nothing runs until you configure who may do each task.
 
 ## Monitor intake
