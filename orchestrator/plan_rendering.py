@@ -117,8 +117,12 @@ def _list(values: list, empty: str = "None recorded.") -> str:
     return "<ul>" + "".join(f"<li>{_html(value)}</li>" for value in values) + "</ul>"
 
 
-def _worker(worker: dict) -> str:
+def _worker(worker: dict, title: str) -> str:
     profiles = _profiles(worker)
+    if worker.get("team_round") is not None:
+        label = f"{title} · Round {worker['team_round']} / Peer {worker['team_peer']}"
+    else:
+        label = f"{title} · {'Team' if len(profiles) > 1 else 'Worker'}"
     profile_badges = []
     for profile in profiles:
         profile_badges.append(
@@ -137,7 +141,7 @@ def _worker(worker: dict) -> str:
         )
     sections = [
         '<details class="worker"><summary>'
-        + _html(worker.get("label") or worker["request_id"])
+        + _html(label)
         + " · "
         + _html(worker["state"])
         + "</summary>",
@@ -405,7 +409,7 @@ def html_page(snapshot: dict, mermaid: str) -> str:
             sections.append('<p class="muted">No dependencies.</p>')
         sections.append("<h3>Workers and model requests</h3>")
         if node.get("workers"):
-            sections.extend(_worker(worker) for worker in node["workers"])
+            sections.extend(_worker(worker, node["title"]) for worker in node["workers"])
         else:
             sections.append(f'<p class="badge">{_html(_assignment(node))}</p>')
         sections.append("</details>")

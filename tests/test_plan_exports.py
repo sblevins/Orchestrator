@@ -1,6 +1,7 @@
 """Real saved plans and transports produce private, standardized offline artifacts."""
 
 import contextlib
+import html
 import json
 import os
 import subprocess
@@ -73,6 +74,9 @@ class PlanExportTests(unittest.TestCase):
             timeout=30,
         )
 
+    def specification(self, node):
+        return encode(next(item for item in self.graph["nodes"] if item["id"] == node))
+
     def add_worker(self, identifier="worker", node="left", profile=None, **fields):
         values = {
             "id": identifier,
@@ -82,7 +86,7 @@ class PlanExportTests(unittest.TestCase):
             "plan_id": self.plan["id"],
             "node_id": node,
             "plan_version": self.plan["version"],
-            "brief": "Assigned work",
+            "brief": self.specification(node) if node else "Team peer brief",
             "mode": "read",
             "state": "selected",
             "evidence_json": "{}",
@@ -150,6 +154,9 @@ class PlanExportTests(unittest.TestCase):
         updated = json.loads(Path(second["snapshot_path"]).read_text())
         self.assertTrue(updated["paused"])
         self.assertEqual(updated["readiness"]["ready"], ["left", "right"])
+        inspect = next(node for node in updated["nodes"] if node["id"] == "inspect")
+        self.assertEqual(inspect["state"], "completed")
+        self.assertIsNone(inspect["readiness"])
         self.assertEqual(updated["plan_status"], self.store.plan(self.plan["id"])["status"])
 
     def test_observer_allowed_but_other_project_unbound_and_inactive_denied(self):
@@ -261,12 +268,76 @@ class PlanExportTests(unittest.TestCase):
         settings = self.home / "config/projects"
         settings.mkdir(parents=True)
         (settings / "alpha.json").write_text('{"execution":{"max_parallel":0}}')
-        snapshot = plan_snapshot(self.store, self.plan["id"])
+        with self.store.transaction() as database:
+            database.execute(
+                "UPDATE graph_nodes SET state='completed' WHERE plan_id=? AND node_id='inspect'",
+                (self.plan["id"],),
+            )
+        result = export_plan(self.store, self.plan["id"])
+        snapshot = json.loads(Path(result["snapshot_path"]).read_text())
         self.assertEqual(snapshot["summary"], self.graph["summary"])
         self.assertIsNone(snapshot["max_parallel"])
         self.assertTrue(snapshot["readiness_notice"])
-        self.assertTrue(all(not nodes for nodes in snapshot["readiness"].values()))
+        self.assertIsNone(snapshot["readiness"])
         self.assertEqual(len(snapshot["nodes"]), 4)
+        self.assertEqual({node["readiness"] for node in snapshot["nodes"]}, {"unavailable"})
+        inspect = next(node for node in snapshot["nodes"] if node["id"] == "inspect")
+        self.assertEqual(inspect["state"], "completed")
+        page = html.unescape(Path(result["html_path"]).read_text())
+        self.assertIn("Readiness: unavailable", page)
+        self.assertIn("completed · unavailable", page)
+        self.assertNotIn("Not applicable", page)
+
+    def test_worker_prompts_never_enter_exported_artifacts(self):
+        marker = "PROMPT_SECRET_MARKER"
+        profiles = [
+            {"harness": "claude", "model": "opus", "effort": "max"},
+            {"harness": "pi", "provider": "openai", "model": "astra", "effort": "high"},
+        ]
+        self.add_worker(profile={"team": profiles}, state="group_running")
+        task = self.store.enqueue("alpha", "alpha", "planner", marker + " task prompt", {})
+        self.add_worker(
+            "child",
+            None,
+            profiles[1],
+            plan_id=None,
+            plan_version=None,
+            brief=marker + " round two instructions and peer report bundle",
+            task_id=task["id"],
+            state="running",
+        )
+        with self.store.transaction() as database:
+            database.execute(
+                "INSERT INTO worker_groups(parent_request_id,state,generation,created,baseline_commit) "
+                "VALUES('worker','round2',1,0,?)",
+                ("a" * 40,),
+            )
+            database.execute(
+                "INSERT INTO worker_group_members(child_request_id,parent_request_id,peer_index,round) "
+                "VALUES('child','worker',1,2)"
+            )
+        result = export_plan(self.store, self.plan["id"])
+        artifacts = {
+            name: Path(result[key]).read_text()
+            for name, key in (
+                ("html", "html_path"),
+                ("mermaid", "mermaid_path"),
+                ("snapshot", "snapshot_path"),
+            )
+        }
+        artifacts["html"] = html.unescape(artifacts["html"])
+        for name, text in artifacts.items():
+            with self.subTest(artifact=name):
+                self.assertNotIn(marker, text)
+        self.assertNotIn(self.specification("left"), artifacts["html"])
+        snapshot = json.loads(artifacts["snapshot"])
+        workers = next(node for node in snapshot["nodes"] if node["id"] == "left")["workers"]
+        self.assertEqual([worker["request_id"] for worker in workers], ["worker", "child"])
+        for worker in workers:
+            self.assertNotIn("label", worker)
+        self.assertIn("Left · Team", artifacts["html"])
+        self.assertIn("Left · Round 2 / Peer 1", artifacts["html"])
+        self.assertIn("Requested: opus / max", artifacts["mermaid"])
 
     def test_current_policy_cannot_invent_or_change_displayed_assignment(self):
         self.add_worker(profile={"harness": "claude", "model": "opus", "effort": "high"})

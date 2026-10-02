@@ -218,7 +218,6 @@ class PlanRenderingTests(unittest.TestCase):
         source["nodes"][0]["workers"] = [
             {
                 "request_id": ADVERSARIAL,
-                "label": ADVERSARIAL,
                 "state": ADVERSARIAL,
                 "profile": {key: ADVERSARIAL for key in ("model", "harness", "provider", "effort")},
                 "profiles": [],
@@ -276,9 +275,15 @@ class PlanRenderingTests(unittest.TestCase):
         source = snapshot()
         source["max_parallel"] = None
         source["readiness_notice"] = "Repair configuration <script>alert(1)</script>"
-        source["readiness"] = {key: [] for key in source["readiness"]}
+        source["readiness"] = None
+        for item in source["nodes"]:
+            item["readiness"] = "unavailable"
+        source["nodes"][0]["state"] = "completed"
         artifact = render(source)
         self.assertIn("Parallel limit: Unavailable", " ".join(artifact.text))
+        self.assertIn("Readiness: unavailable", " ".join(artifact.text))
+        self.assertNotIn("Not applicable", " ".join(artifact.text))
+        self.assertIn("completed · unavailable", artifact.text)
         self.assertIn("Readiness unavailable.", " ".join(artifact.text))
         self.assertIn(source["readiness_notice"], " ".join(artifact.text))
         self.assertEqual(len(artifact.select("aside", role="note")), 1)
@@ -315,7 +320,6 @@ class PlanRenderingTests(unittest.TestCase):
             {
                 "request_id": "peer",
                 "state": "completed",
-                "label": "Round two peer",
                 "task_id": "saved-task",
                 "task_state": "completed",
                 "profiles": [profiles[1]],
@@ -349,7 +353,8 @@ class PlanRenderingTests(unittest.TestCase):
             "medium",
             "exact-b",
             "task",
-            "Round two peer",
+            "root · Team",
+            "root · Round 2 / Peer 1",
             "saved-task",
             "Team parent",
             "Round",

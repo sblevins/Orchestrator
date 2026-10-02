@@ -58,14 +58,16 @@ def plan_snapshot(store, plan_id: str, *, project_id: str | None = None) -> dict
                 "SELECT node_id,state FROM graph_nodes WHERE plan_id=?", (plan_id,)
             )
         }
-        readiness = (
-            ready_nodes(graph, states, config["max_parallel"], config["dependency_failure"])
-            if config
-            else {key: [] for key in ("ready", "blocked", "cancelled", "waiting")}
-        )
-        scheduling = {
-            node_id: category for category, nodes in readiness.items() for node_id in nodes
-        }
+        if config:
+            readiness = ready_nodes(
+                graph, states, config["max_parallel"], config["dependency_failure"]
+            )
+            scheduling = {
+                node_id: category for category, nodes in readiness.items() for node_id in nodes
+            }
+        else:
+            readiness = None
+            scheduling = {node["id"]: "unavailable" for node in graph["nodes"]}
         waves = {}
         for node in _topological(graph["nodes"]):
             waves[node["id"]] = 1 + max(
@@ -91,6 +93,7 @@ def plan_snapshot(store, plan_id: str, *, project_id: str | None = None) -> dict
             for request_id in requests:
                 row = _rows(database, project_id, request_id)[0]
                 view = _view(row, True, detail=True)
+                del view["label"]
                 profile = json.loads(row["profile_json"]) if row["profile_json"] else {}
                 view["profiles"] = _profiles(profile)
                 workers[parent["node_id"]].append(view)
