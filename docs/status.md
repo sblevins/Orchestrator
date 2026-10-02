@@ -23,6 +23,12 @@ Explicit result acceptance completes graph nodes and unlocks dependent work.
 See [workers](workers.md) for policy setup, authority, and acceptance.
 Plain version: a worker can prepare changes separately, but finishing the job does not approve those changes.
 
+Initial routing setup is conversational in both frontends through `project_setup` and `setup_project`.
+The active coordinator can initialize and validate the bound project's policy using user-chosen preferences, without an operator-shell handoff.
+Initial setup closes after configuration or dispatched work, and deleting the policy does not reopen it.
+A sole untracked regular worker-policy file no longer blocks otherwise clean write-workspace preparation; source changes and tracked policy edits still do.
+Plain version: the coordinator can finish its setup without receiving permission to change code.
+
 Claude Code executes Anthropic models only; other models use the owned Pi SDK bridge pinned to 0.99.2.
 The critic is Pi `openai-codex` / `gpt-6-astra` / `high`.
 Pi verifies the exact model, effort, and tool allowlist without silent fallback, uses fresh ephemeral sessions without resume, and reuses canonical auth without inherited plugins.
@@ -43,9 +49,11 @@ See [worker visibility](worker-visibility.md) for reattachment and installed UI 
 
 ## Validation
 
-Last verified 2026-10-01: all 281 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
+Last verified 2026-10-01: all 311 tests passed under a `machine-resources` reservation with resource warnings treated as errors.
 The suite includes real CLI worker selection/approval/acceptance, monitor-owned planned dispatch, dependency gating, signed isolated write results, and local Pi SDK tests against a loopback-only fake provider.
 Family tests cover a real CLI-to-worker run with a fake harness, installed Pi startup, numeric ordering, exact-pin preservation, provider boundaries, reload behavior, and fenced model-usage records.
+Onboarding tests reproduce the original block through real MCP/hook processes, exercise initial setup and permanent closure, and verify signed workspace preparation with untracked setup metadata.
+Cooperating setup writes serialize with revision checks; manual file editors must not run concurrently with conversational setup.
 The subprocess lifecycle tests also passed three consecutive runs after correcting a cleanup lock race.
 Ruff lint/format, Node syntax, and `git diff --check` passed.
 Independent review findings were reproduced and fixed: stale dependency reads, oversized valid plan seeding, and cancellation during final launch preparation.
@@ -73,7 +81,7 @@ Plain version: missing quota information stops quota-based selection, and limite
 
 ## Next decision
 
-Configure the desired worker profiles, then verify live access and review a candidate before explicitly accepting it.
+Tell the coordinator the desired worker profiles and let it complete initial setup, then verify live access and review a candidate before explicitly accepting it.
 Quota-dependent policy must wait for supported evidence or an explicit operator override; it must not silently choose another profile.
 
 ## In flight
