@@ -56,7 +56,7 @@ Explain the estimate's assumptions in basis; omit estimate if unknown rather tha
 Use whole minutes from 1 to 525600, with min_minutes no greater than max_minutes.
 The page computes each wave's ideal parallel duration from the longest task bounds, not the sum; missing task estimates make the wave unknown.
 These estimates exclude queue time, approval waits, and limited worker capacity and are not deadlines.
-For explicitly unrolled review/revise chains, give their nodes a shared cycle id, label, and max_iterations, with iteration marking the round.
+For explicitly unrolled cycles, such as a review/revise chain, give their nodes a shared cycle id, label, and max_iterations, with iteration marking the round.
 Review and revision tasks in one round may share iteration; use explicit dependencies for actual order and keep rounds within the requested maximum.
 Cycle metadata is optional and descriptive only: it cannot repeat, skip, or stop tasks, and a maximum is not an automatic early-exit condition.
 All explicitly saved tasks still follow the normal DAG scheduler; do not promise "stop when clean" without a separately supported execution mechanism.

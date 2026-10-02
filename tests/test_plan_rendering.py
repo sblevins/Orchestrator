@@ -262,16 +262,17 @@ class PlanRenderingTests(unittest.TestCase):
         self.assertNotIn("\x1b", " ".join(artifact.text))
         self.assertEqual(artifact.select("path", **{"class": "edge"})[0]["data-from"], "n0")
 
-    def test_estimates_unknown_waves_and_cross_wave_review_groups(self):
+    def test_estimates_unknown_waves_and_cross_wave_cycle_groups(self):
         source = snapshot()
         first, second, third, fourth = source["nodes"]
+        fourth["title"] = "Final tuning pass"
         first["estimate"] = {"min_minutes": 3, "max_minutes": 8, "basis": ADVERSARIAL}
         second["estimate"] = {"min_minutes": 7, "max_minutes": 12, "basis": "Review"}
         third["estimate"] = {"min_minutes": 4, "max_minutes": 20, "basis": "Checks"}
         for item, iteration in ((first, 1), (second, 2), (fourth, 3)):
             item["cycle"] = {
-                "id": "review",
-                "label": ADVERSARIAL,
+                "id": "tuning",
+                "label": "Benchmark / tune",
                 "iteration": iteration,
                 "max_iterations": 3,
             }
@@ -279,15 +280,21 @@ class PlanRenderingTests(unittest.TestCase):
         self.assertIn("Wave 2 | ideal parallel: 7-20 min", diagram)
         self.assertIn("Wave 3 | ideal parallel: Unknown", diagram)
         self.assertIn("Estimate: 3-8 min | Round 1 / 3", diagram)
-        self.assertIn("Unrolled review/revise · maximum 3 planned rounds", diagram)
-        self.assertIn("n3: Round 3 / 3 (Wave 3)", diagram)
+        cycle_note = next(line for line in diagram.splitlines() if line.startswith("  cycle0["))
+        self.assertIn("Benchmark / tune | Unrolled cycle · maximum 3 planned rounds", cycle_note)
+        self.assertIn("root: Round 1 / 3 (Wave 1); left: Round 2 / 3 (Wave 2)", cycle_note)
+        self.assertIn("Final tuning pass: Round 3 / 3 (Wave 3)", cycle_note)
+        self.assertNotRegex(cycle_note, r"\bn\d+:")
+        self.assertNotIn("review", diagram.lower())
         artifact = render(source)
         text = " ".join(artifact.text)
         for expected in (
             "ideal parallel: 7-20 min",
             "Estimate basis:",
             "Round 2 / 3",
-            "Unrolled review/revise · maximum 3 planned rounds",
+            "Unrolled cycles",
+            "Benchmark / tune",
+            "Unrolled cycle · maximum 3 planned rounds",
             "All saved steps remain scheduled unless the coordinator changes or stops work.",
             "They exclude waits and limited capacity, and are not promised finish times.",
         ):

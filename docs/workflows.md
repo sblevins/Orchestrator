@@ -73,13 +73,13 @@ A wave's ideal parallel range is the largest minimum and largest maximum among i
 It is not a sum, a finish time, or a promise: queue time, approval waits, and constrained worker capacity are not included.
 Plain version: the wave time assumes its tasks can all start together; waiting or fewer workers makes it take longer.
 
-Explicit repeated review/revise nodes may carry `cycle: {"id":"quality","label":"Review / revise","iteration":1,"max_iterations":3}`.
+Explicitly unrolled cycle nodes, such as a repeated review/revise chain, may carry `cycle: {"id":"quality","label":"Review / revise","iteration":1,"max_iterations":3}`.
 The view links grouped tasks across waves and labels each round and the maximum planned round count.
 Multiple tasks can share one round; group labels and maxima must agree, and round numbers must be within the maximum (1 to 256).
 Only explicitly annotated nodes are grouped; neither titles nor team comparison rounds are interpreted as cycle metadata.
 These are already-unrolled DAG steps, not executable loops or conditional retries.
 The scheduler still visits every saved step unless work is separately changed or stopped; a displayed maximum does not add an automatic early exit when findings are gone.
-Plain version: the page shows which steps belong to the same repeated review, but does not decide whether to run another round.
+Plain version: the page shows which steps belong to the same repeated cycle, but does not decide whether to run another round.
 Legacy plans without these optional fields remain valid and show unknown estimates without cycle groups.
 The exported snapshot includes derived `waves` and `cycles` lists as well as the saved node metadata.
 

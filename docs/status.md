@@ -56,7 +56,7 @@ See [workflows](workflows.md#present-a-saved-plan) for the API, CLI, privacy bou
 The renderer uses the existing luxury/silk palette, works offline, and does not need a model to write page markup.
 Plain version: one tool call makes a private plan page; the page does not update itself or start work.
 
-Saved plans can optionally include active-work estimate ranges and explicit unrolled review/revise round labels.
+Saved plans can optionally include active-work estimate ranges and explicit unrolled cycle round labels, such as review/revise rounds.
 The standard view displays task ranges, ideal parallel wave ranges (unknown if any task estimate is missing), and linked round groups.
 These are presentation metadata, not scheduling deadlines or executable early-stop loops.
 

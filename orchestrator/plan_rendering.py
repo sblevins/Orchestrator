@@ -147,10 +147,10 @@ def mermaid_diagram(snapshot: dict) -> str:
             lines.append(f"  {identifiers[dependency]} --> {identifiers[node['id']]}")
     for index, cycle in enumerate(metadata["cycles"]):
         summary = (
-            f"{_compact(cycle['label'], 90)} | Unrolled review/revise · "
+            f"{_compact(cycle['label'], 90)} | Unrolled cycle · "
             f"maximum {cycle['max_iterations']} planned rounds | "
             + "; ".join(
-                f"{identifiers[node['id']]}: {_round(node)} (Wave {node['wave']})"
+                f"{_compact(node['title'])}: {_round(node)} (Wave {node['wave']})"
                 for node in nodes
                 if node["id"] in cycle["node_ids"]
             )
@@ -462,14 +462,12 @@ def html_page(snapshot: dict, mermaid: str) -> str:
         )
     sections.append("</div></section>")
     if metadata["cycles"]:
-        sections.append(
-            f'<section id="cycles"><h2>Review / revise groups</h2><p>{CYCLE_NOTICE}</p>'
-        )
+        sections.append(f'<section id="cycles"><h2>Unrolled cycles</h2><p>{CYCLE_NOTICE}</p>')
         for cycle in metadata["cycles"]:
             sections.append(
                 f'<article class="cycle-card" id="cycle-{cycle_identifiers[cycle["id"]]}">'
                 f"<h3>{_html(cycle['label'])}</h3>"
-                f"<p>Unrolled review/revise · maximum {cycle['max_iterations']} planned rounds</p>"
+                f"<p>Unrolled cycle · maximum {cycle['max_iterations']} planned rounds</p>"
                 + _task_links(cycle["node_ids"], nodes_by_id, identifiers, rounds=True)
                 + "</article>"
             )
