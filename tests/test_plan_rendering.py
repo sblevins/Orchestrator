@@ -644,6 +644,9 @@ if (process.env.PLAN_RENDERING_BROWSER) {
                                 )
                             ),
                             mermaid_diagram(snapshot([node('Say "hi" #42 #quot; `code` R&D <b>')])),
+                            # Mermaid scans %%{ directives even inside quoted labels.
+                            mermaid_diagram(snapshot([node("Raise coverage to 100%%{ups")])),
+                            mermaid_diagram(snapshot([node('%%{init: {"theme": "dark"}}%% 90%')])),
                         ],
                         # Mermaid cannot display these three characters in
                         # plain-text labels; their full-width forms must show.

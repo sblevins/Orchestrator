@@ -95,6 +95,7 @@ def _mermaid_label(label: str) -> str:
         .replace('"', "\uff02")
         .replace("#", "\uff03")
         .replace("`", "\uff40")
+        .replace("%", "\uff05")
     )
 
 
