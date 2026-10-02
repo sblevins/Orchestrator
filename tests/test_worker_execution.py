@@ -103,7 +103,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_dirty_source_not_stashed(self):
         (self.source / "file.txt").write_text("user edits")
-        with self.assertRaisesRegex(WorkspaceError, "clean"):
+        with self.assertRaisesRegex(WorkspaceError, "uncommitted"):
             self.prepare()
         self.assertEqual((self.source / "file.txt").read_text(), "user edits")
         self.assertEqual(git(self.source, "stash", "list"), "")
@@ -228,9 +228,20 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_bounded_artifact(self):
         workspace = self.prepare()
-        (Path(workspace["path"]) / "large").write_text("x" * (5 * 1024 * 1024))
-        with self.assertRaisesRegex(WorkspaceError, "output exceeds"):
+        (Path(workspace["path"]) / "large").write_text("x" * 4096)
+        with (
+            patch("orchestrator.worker_execution.MAX_PATCH_BYTES", 1024),
+            self.assertRaisesRegex(WorkspaceError, "output exceeds"),
+        ):
             capture_workspace(workspace)
+        self.assert_source_untouched()
+
+    def test_binary_artifact_above_old_four_megabyte_limit(self):
+        workspace = self.prepare()
+        (Path(workspace["path"]) / "large.bin").write_bytes(os.urandom(5 * 1024 * 1024))
+        result = capture_workspace(workspace)
+        self.assertGreater(result["diff_bytes"], 4 * 1024 * 1024)
+        git(self.source, "verify-commit", result["commit"])
         self.assert_source_untouched()
 
     def test_read_non_git_and_invalid_id(self):

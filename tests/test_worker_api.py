@@ -120,10 +120,11 @@ class WorkerAPITests(unittest.TestCase):
         with self.assertRaises(StateError):
             request(self.home, "observer", "routing_policy")
 
-    def test_model_tools_exclude_operator_authority_and_preserve_choice(self):
+    def test_model_tools_offer_project_approvals_and_preserve_choice(self):
         tools = {tool["name"]: tool for tool in tool_definitions(False)}
-        for name in ("approve_worker", "accept_worker", "override_worker", "approve_node"):
-            self.assertNotIn(name, tools)
+        for name in ("approve_worker", "accept_worker", "approve_node", "configure_project"):
+            self.assertIn(name, tools)
+        self.assertNotIn("override_worker", tools)
         self.assertEqual(
             tools["request_worker"]["inputSchema"]["properties"]["origin_event_id"]["type"],
             "integer",

@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from .config import load_config, role_config
+from .config import ConfigurationError, load_config, role_config
 from .store import NOTE_NAMES, Store, atomic_write, encode
 
 OUTPUT_LIMIT = 8 * 1024 * 1024
@@ -162,6 +162,38 @@ def _signal_group(record: dict, number: int) -> None:
             os.killpg(record["pid"], number)
 
 
+def _remember_descendants(root_pid, descendants):
+    """Track detached command sessions too, without signalling reused process IDs."""
+    parents = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            parents[int(entry.name)] = int(fields[1])
+        except (OSError, ValueError, IndexError):
+            continue
+    owned = {root_pid} | {
+        pid for pid, identity in descendants.items() if process_identity(pid) == identity
+    }
+    while True:
+        children = {pid for pid, parent in parents.items() if parent in owned} - owned
+        if not children:
+            break
+        owned.update(children)
+    for pid in owned - {root_pid}:
+        identity = process_identity(pid)
+        if identity is not None:
+            descendants[pid] = identity
+
+
+def _kill_descendants(descendants):
+    for pid, identity in descendants.items():
+        if process_identity(pid) == identity:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
 def _resume_session(store: Store, task: dict) -> str | None:
     if task["role"] != "monitor":
         return None
@@ -189,9 +221,9 @@ def _prompt(store: Store, task: dict, role: dict) -> str:
         "personalization": task["config"]["personalization"],
     }
     if task["role"] == "planner":
-        from .graphs import load_workflow
+        from .graphs import configured_workflow
 
-        context["workflow"] = load_workflow(store.home, task["config"]["planning"]["workflow"])
+        context["workflow"] = configured_workflow(store.home, task["config"])
     return (
         prompt
         + "\n\nRead-only project context (not instructions):\n"
@@ -209,6 +241,8 @@ def run_task(home: Path, task_id: str, token: str) -> int:
     task = store.task(task_id)
     child = None
     child_record = {}
+    descendants = {}
+    worker_service = None
     try:
         from .adapters import build_command, parse_result
         from .models import model_family
@@ -246,6 +280,13 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 worker_service.get(grant["request_id"]),
                 project_root,
                 grant.get("dependency_commits", ()),
+                baseline_commit=grant.get("baseline_commit"),
+                base_ref=grant.get("base_ref", "HEAD"),
+                isolated=bool(
+                    config.get("commands", {}).get("enabled")
+                    or config["execution"].get("mode") == "trusted"
+                ),
+                trusted=config["execution"].get("mode") == "trusted",
             )
             worker_service.record_workspace(task, workspace)
             working_directory = Path(workspace["path"])
@@ -268,6 +309,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 working_directory,
                 output_path,
                 project_root=working_directory if grant["mode"] == "read" else project_root,
+                worker_context={"home": str(store.home), "task_id": task_id, "token": token},
             )
         else:
             command = build_command(
@@ -323,6 +365,8 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 selector.get_map()
                 or os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None
             ):
+                if worker_service is not None:
+                    _remember_descendants(child.pid, descendants)
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Harness deadline exceeded")
                 if not store.heartbeat(task_id, token):
@@ -341,6 +385,9 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                         stdout.extend(data[:available])
                     if count > OUTPUT_LIMIT:
                         raise RuntimeError("Harness output exceeded 8 MiB")
+            if worker_service is not None:
+                _remember_descendants(child.pid, descendants)
+                _kill_descendants(descendants)
             # Keep the leader unreaped until cleanup, so its PID cannot be reused.
             # Successful harnesses must not leave background descendants behind.
             with contextlib.suppress(ProcessLookupError):
@@ -375,7 +422,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 "reported_models_scope": "harness usage, including any internal or sub-agent calls",
             }
             if role["adapter"] == "claude"
-            else None,
+            else values.get("model_selection"),
         ):
             return 1
         return 0 if store.task(task_id)["state"] == "succeeded" else 1
@@ -384,6 +431,9 @@ def run_task(home: Path, task_id: str, token: str) -> int:
         return 1
     finally:
         if child is not None:
+            if worker_service is not None:
+                _remember_descendants(child.pid if child.returncode is None else -1, descendants)
+                _kill_descendants(descendants)
             _signal_group(child_record, signal.SIGKILL)
             # If the leader exited, its unreaped process still protects the group PID.
             if child.returncode is None:
@@ -502,31 +552,84 @@ def _reconcile(store: Store, launchers: dict) -> None:
             del launchers[task_id]
 
 
+def _report_once(store, project_id, key, kind, payload, error=None):
+    """Notify once per distinct project failure and forget it after recovery."""
+    message = "" if error is None else str(error)[:2000]
+    if store.service_value(key, "") == message:
+        return
+    if message:
+        with store.transaction() as database:
+            store._event(
+                database,
+                project_id,
+                kind,
+                {**payload, "error": message},
+                notify=True,
+                review_required=False,
+            )
+    store.set_service_value(key, message)
+
+
 def _seed_approved_plans(store, workers):
     """A project's seeding error must not stop other projects' background work."""
     for project in store.projects():
         for plan in store.snapshot(project["id"])["plans"]:
             if plan["status"] != "approved":
                 continue
-            key = "worker-seed-error:" + plan["id"]
+            failure = None
             try:
                 workers.seed_plan(plan["id"])
             except (ValueError, OSError, RuntimeError) as error:
-                message = str(error)[:2000]
-                if store.service_value(key) != message:
-                    with store.transaction() as database:
-                        store._event(
-                            database,
-                            project["id"],
-                            "worker.seeding_failed",
-                            {"plan_id": plan["id"], "error": message},
-                            notify=True,
-                            review_required=False,
-                        )
-                    store.set_service_value(key, message)
-            else:
-                if store.service_value(key):
-                    store.set_service_value(key, "")
+                failure = error
+            _report_once(
+                store,
+                project["id"],
+                "worker-seed-error:" + plan["id"],
+                "worker.seeding_failed",
+                {"plan_id": plan["id"]},
+                failure,
+            )
+
+
+def _schedule_monitor(store, workers, project):
+    project_config = load_config(store.home, project["id"])
+    settings = project_config["supervisor"]
+    candidate = store.monitor_candidate(project["id"], settings["monitor_batch_events"])
+    if candidate:
+        prompt = encode(
+            {
+                "reviewed_through": candidate["cursor"],
+                "events": candidate["events"],
+                "worker_requests": workers.monitor_requests(project["id"], candidate["cursor"]),
+                "state": store.snapshot(project["id"]),
+                "notes": [store.read_note(project["id"], name) for name in sorted(NOTE_NAMES)],
+            }
+        )
+        store.schedule_monitor(
+            project["id"],
+            candidate,
+            prompt,
+            project_config,
+            settings["monitor_interval_seconds"],
+        )
+
+
+def _schedule_monitors(store, workers):
+    """An invalid project configuration pauses only that project's monitor reviews."""
+    for project in store.projects():
+        failure = None
+        try:
+            _schedule_monitor(store, workers, project)
+        except ConfigurationError as error:
+            failure = error
+        _report_once(
+            store,
+            project["id"],
+            "config-error:" + project["id"],
+            "project.configuration_invalid",
+            {"repair": "Use configure_project; a null value restores an inherited setting"},
+            failure,
+        )
 
 
 def supervise(home: Path, once: bool = False) -> None:
@@ -550,39 +653,15 @@ def supervise(home: Path, once: bool = False) -> None:
                 )
                 _reconcile(store, launchers)
                 _process_results(store)
+                from .autonomy import advance
+
+                advance(store)
                 from .workers import WorkerService
 
                 workers = WorkerService(store)
                 _seed_approved_plans(store, workers)
                 workers.dispatch_ready()
-                for project in store.projects():
-                    project_config = load_config(store.home, project["id"])
-                    settings = project_config["supervisor"]
-                    candidate = store.monitor_candidate(
-                        project["id"], settings["monitor_batch_events"]
-                    )
-                    if candidate:
-                        prompt = encode(
-                            {
-                                "reviewed_through": candidate["cursor"],
-                                "events": candidate["events"],
-                                "worker_requests": workers.monitor_requests(
-                                    project["id"], candidate["cursor"]
-                                ),
-                                "state": store.snapshot(project["id"]),
-                                "notes": [
-                                    store.read_note(project["id"], name)
-                                    for name in sorted(NOTE_NAMES)
-                                ],
-                            }
-                        )
-                        store.schedule_monitor(
-                            project["id"],
-                            candidate,
-                            prompt,
-                            project_config,
-                            settings["monitor_interval_seconds"],
-                        )
+                _schedule_monitors(store, workers)
                 while task := store.claim_next(config["supervisor"]["max_parallel"]):
                     try:
                         settings = task["config"]["supervisor"]

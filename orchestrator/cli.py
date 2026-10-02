@@ -17,7 +17,8 @@ from pathlib import Path
 
 from . import __version__
 from .api import request
-from .config import load_config
+from .config import load_config, repairable_config
+from .execution_context import externally_managed
 from .store import StateError, Store, atomic_write, encode
 
 CODE_HOME = Path(__file__).resolve().parent.parent
@@ -212,6 +213,8 @@ def _read_hook_input() -> dict:
 
 
 def watch(home: Path, session_id: str, seconds: float) -> int:
+    from .monitoring import delivery_updates
+
     if not 0 < seconds <= 27000:
         raise StateError("Watcher duration must be between 0 and 27000 seconds")
     store = Store(home)
@@ -228,7 +231,9 @@ def watch(home: Path, session_id: str, seconds: float) -> int:
             session = store.session(session_id)
             if not session["active"]:
                 return 0
-            pending = store.updates(session_id)
+            config = repairable_config(home, session["project_id"]) or {}
+            quiet_seconds = config.get("monitoring", {}).get("quiet_seconds", 20)
+            pending = delivery_updates(store, session_id, quiet_seconds)["interrupting"]
             if pending:
                 previous = json.loads(store.service_value(f"wake:{session_id}", "{}"))
                 latest = pending[-1]["id"]
@@ -371,6 +376,7 @@ def start(home: Path, arguments) -> int:
             }
         )
         environment.pop("ORCHESTRATOR_CHILD", None)
+        environment.pop("NO_MISTAKES_GATE", None)
         supervisor = config["supervisor"]
         managed = [
             resource_manager,
@@ -416,7 +422,7 @@ def main(argv=None) -> int:
         if command == "hooks":
             from .hooks import handle_hook
 
-            if os.environ.get("ORCHESTRATOR_CHILD") == "1":
+            if externally_managed():
                 emit({})
                 return 0
             try:
@@ -428,7 +434,7 @@ def main(argv=None) -> int:
                 raise
             return 0
         if command == "watch":
-            if os.environ.get("ORCHESTRATOR_CHILD") == "1":
+            if externally_managed():
                 return 0
             session_id = arguments.session
             if not session_id:

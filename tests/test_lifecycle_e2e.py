@@ -30,6 +30,7 @@ class LifecycleE2ETests(unittest.TestCase):
         self.store.open_session(self.session_id, "claude", "example")
         self.environment = {
             **os.environ,
+            "NO_MISTAKES_GATE": "",
             "ORCHESTRATOR_HOME": str(self.home),
             "ORCHESTRATOR_SESSION_ID": self.session_id,
             "PYTHONPATH": str(ROOT),
@@ -53,6 +54,8 @@ class LifecycleE2ETests(unittest.TestCase):
         return result
 
     def test_native_clear_keeps_durable_project_binding(self):
+        # The real SessionStart hook starts this home's supervisor.
+        self.addCleanup(self.cleanup_service)
         self.command(
             "hooks", "SessionEnd", payload={"session_id": self.session_id, "reason": "clear"}
         )
@@ -281,6 +284,8 @@ os.execv(args[0],args)
 
     def test_authorized_write_creates_signed_candidate_without_modifying_source(self):
         self.install_fake_harnesses()
+        with (self.home / "config/local.toml").open("a") as settings:
+            settings.write("[permissions]\nrequire_write_approval=true\n")
         self.addCleanup(self.cleanup_service)
         self.environment["ORCH_TEST_WORKER_WRITE"] = "1"
         key = self.home / "signing"

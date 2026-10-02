@@ -64,7 +64,8 @@ Those need upstream plugin changes and a separately sanitized worker-progress pr
 
 **Stopping a native observer stops its display, not the worker.**
 Use the coordinator's explicit `cancel_task` control for the underlying job, then wait for terminal confirmation.
-An observer can show a completed `candidate`, but only operator acceptance completes the graph node and releases dependencies.
+An observer can show a completed `candidate`, but checked acceptance through bound `accept_worker`, the optional CLI, or standing `execution.unattended` authorization completes the graph node and releases dependencies.
+Unattended acceptance requires an explicit empty `remaining_issues` list and satisfied live gates; observers never approve or accept work.
 Project observers may view jobs but cannot cancel or accept them.
 
 Public views contain bounded, project-scoped status and allowlisted final report fields.

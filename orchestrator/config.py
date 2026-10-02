@@ -1,8 +1,14 @@
 """Validated, layered configuration for the local supervisor."""
 
+import contextlib
+import hashlib
+import json
 import math
+import os
 import re
+import stat
 import tomllib
+import unicodedata
 from copy import deepcopy
 from pathlib import Path
 
@@ -17,7 +23,7 @@ CORE_ROLES = ("orchestrator", "planner", "critic", "monitor")
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "default.toml"
 ADAPTER_EFFORTS = {
     "claude": {"low", "medium", "high", "xhigh", "max"},
-    "pi": {"off", "minimal", "low", "medium", "high", "xhigh"},
+    "pi": {"off", "minimal", "low", "medium", "high", "xhigh", "max"},
 }
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep"}
 SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
@@ -27,6 +33,16 @@ MEMORY = re.compile(r"([1-9][0-9]{0,6})([MG])\Z")
 
 def _fail(message):
     raise ConfigurationError(message)
+
+
+def image_model_identifier(model) -> bool:
+    """Accept one exact image-model identifier, in settings and image requests alike."""
+    if not isinstance(model, str) or not 0 < len(model) <= 256 or model.startswith("-"):
+        return False
+    return not any(
+        character.isspace() or unicodedata.category(character) in ("Cc", "Cf", "Cs")
+        for character in model
+    )
 
 
 def _table(parent, key, context="config"):
@@ -75,7 +91,7 @@ def _command(value, context):
         _fail(f"{context} contains a forbidden permission bypass")
 
 
-def validate_executor(settings: dict, context="profile") -> None:
+def validate_executor(settings: dict, context="profile", *, allow_effort_selector=False) -> None:
     """Keep the requested provider on its configured harness, without fallback."""
     adapter = settings.get("adapter", settings.get("harness"))
     model = settings.get("model")
@@ -97,9 +113,11 @@ def validate_executor(settings: dict, context="profile") -> None:
             _fail(f"{context}: use Claude Code for Anthropic models, not Pi")
     else:
         _fail(f"{context}: use claude for Anthropic models or pi with an explicit provider")
-    if (
-        not isinstance(settings.get("effort"), str)
-        or settings["effort"] not in ADAPTER_EFFORTS[adapter]
+    if not isinstance(settings.get("effort"), str) or (
+        settings["effort"] not in ADAPTER_EFFORTS[adapter]
+        and not (
+            allow_effort_selector and adapter == "pi" and settings["effort"] == "max-supported"
+        )
     ):
         _fail(f"{context}.effort is unsupported by {adapter}; no silent effort downgrade")
 
@@ -108,6 +126,32 @@ def validate_config(config: dict) -> None:
     """Validate required structure and safety limits without model-name enums."""
     if not isinstance(config, dict):
         _fail("config must be a table")
+    if "permissions" in config:
+        permissions = _table(config, "permissions")
+        choices = {"coordinator_approvals", "require_write_approval", "enforce_monitor_holds"}
+        if set(permissions) - choices:
+            _fail("permissions supports only: " + ", ".join(sorted(choices)))
+        if any(type(value) is not bool for value in permissions.values()):
+            _fail("permissions settings must be booleans")
+    if "images" in config:
+        images = _table(config, "images")
+        allowed_image_fields = {"enabled", "model", "size", "quality", "output_format"}
+        if set(images) != allowed_image_fields or type(images.get("enabled")) is not bool:
+            _fail(
+                "images requires enabled, model, size, quality and output_format; credentials belong in OPENAI_API_KEY, not project settings"
+            )
+        if not image_model_identifier(images.get("model")):
+            _fail(
+                "images.model must be one exact image-model identifier of at most 256 "
+                "characters, without a leading hyphen, whitespace or control characters"
+            )
+        for field, choices in {
+            "size": {"auto", "1024x1024", "1536x1024", "1024x1536"},
+            "quality": {"auto", "low", "medium", "high"},
+            "output_format": {"png", "jpeg"},
+        }.items():
+            if not isinstance(images.get(field), str) or images[field] not in choices:
+                _fail(f"images.{field} must be one of: {', '.join(sorted(choices))}")
     supervisor = _table(config, "supervisor")
     for key in ("poll_seconds", "heartbeat_seconds", "stale_seconds", "monitor_interval_seconds"):
         _number(supervisor.get(key), f"supervisor.{key}", 0.1, 86400)
@@ -130,13 +174,68 @@ def validate_config(config: dict) -> None:
             "planning.workflow must be a safe identifier: 1-128 ASCII letters, digits, "
             "underscores or hyphens, beginning with a letter or digit"
         )
+    if "templates" in planning:
+        from .graphs import validate_plan
+
+        templates = _table(planning, "templates", "planning")
+        if len(templates) > 64:
+            _fail("planning.templates supports at most 64 templates")
+        for name, template in templates.items():
+            if not isinstance(name, str) or not SAFE_IDENTIFIER.fullmatch(name):
+                _fail(f"planning.templates.{name}: template name must be a safe identifier")
+            try:
+                validate_plan(template)
+            except (ValueError, TypeError) as error:
+                _fail(f"planning.templates.{name}: {error}")
     _number(planning.get("max_review_rounds"), "planning.max_review_rounds", 1, 100, True)
+    if planning.get("clarification", "material") not in ("material", "always", "none"):
+        _fail("planning.clarification must be material, always or none")
     execution = _table(config, "execution")
+    if execution.get("mode", "restricted") not in ("restricted", "trusted"):
+        _fail("execution.mode must be restricted or trusted")
+    if type(execution.get("unattended", False)) is not bool:
+        _fail("execution.unattended must be a boolean standing project authorization")
+    if execution.get("worker_difficulty", "hard") not in ("easy", "hard", "very-hard"):
+        _fail("execution.worker_difficulty must be easy, hard or very-hard")
+    base_ref = execution.get("base_ref", "HEAD")
+    if (
+        not isinstance(base_ref, str)
+        or not base_ref.strip()
+        or len(base_ref) > 256
+        or base_ref.startswith("-")
+        or any(ord(character) < 32 for character in base_ref)
+    ):
+        _fail(
+            "execution.base_ref must be an existing Git ref or commit, such as crosschain/integration"
+        )
+    if "commands" in config:
+        commands = _table(config, "commands")
+        if set(commands) - {"enabled", "sandbox", "network", "timeout_seconds", "tool_paths"}:
+            _fail("commands supports enabled, sandbox, network, timeout_seconds and tool_paths")
+        for flag, default in (("enabled", False), ("sandbox", True), ("network", False)):
+            if type(commands.get(flag, default)) is not bool:
+                _fail(f"commands.{flag} must be a boolean")
+        _number(commands.get("timeout_seconds", 300), "commands.timeout_seconds", 1, 900, True)
+        paths = commands.get("tool_paths", {})
+        if not isinstance(paths, dict) or len(paths) > 64:
+            _fail("commands.tool_paths must map at most 64 executable names to absolute paths")
+        for name, path in paths.items():
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", name):
+                _fail("commands.tool_paths keys must be executable basenames")
+            if not isinstance(path, str) or not Path(path).is_absolute() or "\x00" in path:
+                _fail(f"commands.tool_paths.{name} must be an absolute executable path")
     _number(execution.get("max_parallel"), "execution.max_parallel", 1, 64, True)
     if execution.get("dependency_failure") not in ("block", "cancel"):
         _fail("execution.dependency_failure must be block or cancel")
     if "monitoring" in config:
         monitoring = _table(config, "monitoring")
+        _number(monitoring.get("quiet_seconds", 20), "monitoring.quiet_seconds", 0, 600)
+        _number(
+            monitoring.get("foreground_stale_seconds", 900),
+            "monitoring.foreground_stale_seconds",
+            60,
+            86400,
+        )
         if type(monitoring.get("review_every_prompt")) is not bool:
             _fail("monitoring.review_every_prompt must be a boolean")
         routine = monitoring.get("routine_prompts")
@@ -248,6 +347,24 @@ def _private_path(home, relative):
 
 def load_config(home: Path, project_id: str | None = None) -> dict:
     """Merge tracked defaults, home/config/local.toml, then a project override."""
+    config = unvalidated_config(home, project_id)
+    try:
+        validate_config(config)
+    except RuntimeError as error:
+        raise ConfigurationError(f"cannot validate configuration: {error}") from error
+    return config
+
+
+def repairable_config(home: Path, project_id: str | None = None) -> dict | None:
+    """Return validated settings, or None while a project's settings await repair."""
+    try:
+        return load_config(home, project_id)
+    except ConfigurationError:
+        return None
+
+
+def unvalidated_config(home, project_id=None, project_override=None) -> dict:
+    """Merge configuration layers, optionally replacing the saved project JSON override."""
     try:
         home = Path(home).resolve()
         if project_id is not None and (
@@ -262,10 +379,69 @@ def load_config(home: Path, project_id: str | None = None) -> dict:
         if project_id is not None:
             project_path = _private_path(home, f"config/projects/{project_id}.toml")
             config = _merge(config, _read(project_path, optional=True))
-        validate_config(config)
+            if project_override is None:
+                project_override, _ = read_project_override(home, project_id)
+            config = _merge(config, project_override)
         return config
     except (OSError, RuntimeError) as error:
         raise ConfigurationError(f"cannot resolve configuration path: {error}") from error
+
+
+PROJECT_SETTINGS_LIMIT = 1024 * 1024
+
+
+@contextlib.contextmanager
+def project_config_directory(home, project_id, *, create=False):
+    """Open the private directory without traversing any symlink components."""
+    if not isinstance(project_id, str) or not PROJECT_ID.fullmatch(project_id):
+        _fail("Invalid bound project identifier")
+    path = Path(os.path.abspath(home)) / "config" / "projects"
+    with contextlib.ExitStack() as stack:
+        directory = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+        stack.callback(os.close, directory)
+        for index, component in enumerate(path.parts[1:], start=1):
+            if create and index >= len(path.parts) - 2:
+                with contextlib.suppress(FileExistsError):
+                    os.mkdir(component, mode=0o700, dir_fd=directory)
+            directory = os.open(
+                component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+            )
+            stack.callback(os.close, directory)
+        yield directory
+
+
+def _json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            _fail(f"Duplicate project setting: {key}")
+        result[key] = value
+    return result
+
+
+def read_project_override(home, project_id):
+    """Read a bounded regular JSON override and its content revision."""
+    try:
+        with project_config_directory(home, project_id) as directory:
+            descriptor = os.open(
+                project_id + ".json",
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=directory,
+            )
+            with os.fdopen(descriptor, "rb") as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    _fail("Project settings must be a regular file")
+                raw = source.read(PROJECT_SETTINGS_LIMIT + 1)
+        if len(raw) > PROJECT_SETTINGS_LIMIT:
+            _fail("Project settings exceed 1 MiB")
+        settings = json.loads(raw, object_pairs_hook=_json_object)
+        if not isinstance(settings, dict):
+            _fail("Project settings must be an object")
+        return settings, hashlib.sha256(raw).hexdigest()
+    except FileNotFoundError:
+        return {}, "missing"
+    except (OSError, ValueError, RecursionError) as error:
+        raise ConfigurationError(f"Cannot read project settings: {error}") from error
 
 
 def role_config(config: dict, role: str) -> dict:

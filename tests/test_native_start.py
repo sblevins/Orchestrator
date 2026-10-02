@@ -26,7 +26,12 @@ class NativeStartTests(unittest.TestCase):
         self.environment = patch.dict(os.environ, {}, clear=False)
         self.environment.start()
         self.addCleanup(self.environment.stop)
-        for key in ("ORCHESTRATOR_SESSION_ID", "ORCHESTRATOR_HOME", "ORCHESTRATOR_CHILD"):
+        for key in (
+            "ORCHESTRATOR_SESSION_ID",
+            "ORCHESTRATOR_HOME",
+            "ORCHESTRATOR_CHILD",
+            "NO_MISTAKES_GATE",
+        ):
             os.environ.pop(key, None)
 
     def test_native_frontend_claim_uses_supervisor_limits_once(self):
@@ -151,6 +156,10 @@ class NativeStartTests(unittest.TestCase):
         self.assertTrue(reopened["session"]["active"])
 
     def test_native_claude_guards_workers_and_cross_session_tools(self):
+        for target in ("orchestrator.hooks.claude_parent", "orchestrator.bootstrap.claude_parent"):
+            parent = patch(target, return_value=None)
+            parent.start()
+            self.addCleanup(parent.stop)
         handle_hook(self.home, "SessionStart", {"session_id": "native-claude"})
         for name in ("Bash", "Edit", "Write", "Agent", "mcp__other__execute"):
             result = handle_hook(

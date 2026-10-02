@@ -48,11 +48,19 @@ Background roles always use Orchestrator configuration.
 ## Configure
 
 Tracked defaults live in `config/default.toml`.
-Private `config/local.toml` overrides them; `config/projects/PROJECT_ID.toml` adds project preferences.
+Private `config/local.toml` overrides them; `config/projects/PROJECT_ID.toml` adds project preferences, followed by private `config/projects/PROJECT_ID.json`.
+Ask the bound coordinator to read `project_settings` and apply partial changes with `configure_project`, optionally checking `expected_revision`.
+It changes only that project's JSON override, never shared defaults, local/global settings, or another project.
+Roles, effort, personalization, monitoring, validated `planning.templates` graphs, execution, and permissions can be changed conversationally.
+Role/model settings are captured for tasks, so new tasks use updated choices; permissions, concurrency, and worker/routing disable settings remain live at enforcement points.
+Native foreground model and effort changes still use `/model` and `/effort`.
+Executable commands remain trusted local configuration, not conversational settings, because they can have effects outside the project.
 If you have no private configuration yet, run `./bin/orchestrator config init`.
 Edit each role's model and effort without changing Python code.
 Use `model = "Opus"` or `model = "Fable"` to follow that supported family, or an exact ID such as `claude-opus-5-5` to keep a version pin.
-`Sonnet` and `Haiku` also work; family names are case-insensitive and existing pins stay unchanged.
+`Sonnet` and `Haiku` also work; Pi additionally supports `Astra` and `Sol` in the selected provider's installed catalog, with exact IDs taking precedence.
+Family names are case-insensitive and existing pins stay unchanged.
+Pi worker profiles can use `max-supported` to request the highest supported effort for the selected model.
 See [model families](docs/configuration.md#model-families-or-exact-versions) for Claude/Pi resolution and catalog limits.
 Shared background settings handle deadlines and machine-resource reservations; roles do not need individual timeout, CPU, or memory parameters.
 There is no per-role dollar budget or spending-cap parameter.
@@ -67,7 +75,8 @@ The agreed defaults are included in [`config/default.toml`](config/default.toml)
 | Independent critic | Pi (`openai-codex`) | `gpt-6-astra` | `high` |
 | Slow monitor | Claude | `claude-opus-5-5` | `high` |
 
-Workers use a project-local FirstMate-compatible routing policy, with no default worker model or effort.
+Workers use a project-local routing policy with configured classifications or legacy FirstMate-compatible rules/default.
+There is no default worker model; the caller chooses difficulty or exact effort, or uses an explicitly configured profile effort.
 Claude Code runs Anthropic specialists; Pi runs specialists from every other provider.
 Missing model access, unsupported effort, or a missing policy stops dispatch rather than silently switching models.
 Fable and the other models discussed in the research remain alternatives, not silently enabled defaults.
@@ -98,10 +107,21 @@ See [configuration](docs/configuration.md) and [workflow templates](docs/workflo
 Every prompt is saved; exact routine status questions do not start an expensive review by default.
 Ambiguous or consequential messages do, and the orchestrator cannot veto that requirement.
 
+## Planning, monitoring, and images
+
+Clarify material unknowns before a paid planner call, then obtain independent final review.
+Use `retry_review` to retry an eligible failed critic against the saved draft without rerunning the planner; unknown outcomes are not blindly replayed.
+The monitor waits for foreground completion and `monitoring.quiet_seconds` (20 by default).
+Only blocking monitor findings interject; informational and warning findings stay silent.
+Explicit image generation uses the separately billed OpenAI Images API with `OPENAI_API_KEY`, not subscription OAuth.
+Project `images.enabled` defaults to false, and supported outputs are PNG and JPEG.
+Plain version: settle important questions before paying for planning, keep routine feedback quiet, and enable images separately if you want to pay for them.
+These integrations are undergoing offline validation; see [current status](docs/status.md) for validation and deployment limits.
+
 ## Included now
 
 - Four planning roles, with only orchestrator and monitor remaining ongoing roles.
-- Validated dependency graphs, bounded critique/revision rounds, and explicit operator approval.
+- Validated dependency graphs, bounded critique/revision rounds, and project-scoped conversational approvals.
 - Durable jobs, attempt fencing, process identity checks, cancellation, deadlines, and restart reconciliation.
 - Per-project notes with revision checks and a single active coordinator.
 - Persistent feedback with explicit acknowledgment, monitor failure backoff, and blocking findings.
@@ -117,11 +137,13 @@ See [worker visibility](docs/worker-visibility.md) for attachment, reattachment,
 
 ## Worker setup
 
-Tell the coordinator to finish initial project setup.
-After binding, it can create and validate `.orchestrator/crew-dispatch.json` through its own setup tools, without asking you to run shell commands.
-It asks for missing worker model/effort preferences instead of inventing defaults.
-Initial setup permissions close after configuration; they never grant source-code writes or worker approval.
-An untracked regular worker-policy file does not make an otherwise clean repository ineligible for write workers.
+Tell the coordinator to configure or repair project routing whenever needed.
+After binding, it can repeatedly create, replace, and validate `.orchestrator/crew-dispatch.json` through `setup_project(policy, expected_revision)`, with optional revision checking and no shell-command handoff.
+Incomplete drafts and deleted policies can be repaired here; setup is never permanently sealed.
+It asks for missing worker preferences instead of inventing models.
+Saving configuration does not launch or accept work.
+Sole regular routing-policy changes do not make an otherwise clean repository ineligible for isolated snapshots, including untracked files and tracked or staged policy additions, modifications, and deletions.
+Real source changes still block snapshot preparation; no stash, commit, ignore rule, or Git exclude write is needed for routing-only changes.
 Plain version: give it your worker preferences in chat, and it saves the setup for you.
 
 The CLI remains available if you prefer manual setup:
@@ -132,27 +154,45 @@ The CLI remains available if you prefer manual setup:
 ./bin/orchestrator routing validate --project my-project
 ```
 
-The slow monitor chooses plan-associated workers; the orchestrator chooses unrelated on-demand workers.
-Both follow the same project policy, with explicit provider/model/effort selections saved before launch.
-No separate routing model runs.
-An empty policy is intentionally not enough to execute a worker.
-Write workers require operator approval and work in isolated Git worktrees, never your source checkout.
-Successful results need operator acceptance before graph dependents start.
-Workers use file tools only: they cannot run shell commands or tests, and must disclose checks they could not perform.
-See [worker routing](docs/workers.md) for policy format, permissions, and operator commands.
-Plain version: choose your worker preferences once, then review permissions and results here without opening more terminals.
+The bound coordinator selects planned and on-demand workers without relabeling plan origins.
+For named classifications it chooses `easy`, `hard`, or `very-hard` difficulty, or exact effort; the router supplies the configured model or team.
+The monitor still selects supplied legacy pending plan workers.
+Without unattended authorization, classification suggestions become `worker.routing_recommended` notifications and the coordinator chooses final difficulty or effort.
+With unattended authorization, monitor classification recommendations can select pending planned workers using configured profile effort or `execution.worker_difficulty` (default `hard`), without inventing models or effort.
+No separate routing model runs, and an empty policy cannot execute a worker.
+Read-only Git audit, research, and design teams use 2 to 8 distinct configured models over the same frozen Git commit and accepted dependencies.
+Two rounds compare complete untrusted reports under normal concurrency: four peers mean eight jobs, without guaranteed consensus.
+Peers can also exchange live durable messages through `send_team_message` and `read_team_messages`; neither messages nor reports grant new authority.
+Child workers use native observers in the existing frontend, never new Herder windows.
+Only the parent team's result can be accepted.
+
+Permissions default to `coordinator_approvals=true`, `require_write_approval=false`, and `enforce_monitor_holds=true`; change them locally with `configure_project`.
+The coordinator can use `approve_plan`, `resolve_hold`, `approve_worker`, `accept_worker`, `approve_node`, and `cancel_worker` with reasons instead of sending you to an operator CLI.
+Plan approval still requires independent review and fresh monitor evidence.
+`execution.unattended = true` provides standing project authorization for reviewed-plan approval and candidate acceptance when `remaining_issues` is explicitly empty and live gates pass.
+It never supplies required explicit worker approval, including security-audit teams, and only team parents can be accepted.
+Write workers use isolated Git worktrees, never your source checkout.
+Project ownership, dependency correctness, source isolation, credential limits, and no blind retry of unknown outcomes remain mandatory.
+Workers use file tools, plus owned `run_command` for commands and tests when `commands.enabled = true` or `execution.mode = "trusted"`; without it they must disclose checks they could not perform.
+Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
+`execution.mode = "trusted"` also enables native foreground tools.
+`execution.base_ref` selects the Git branch for worker checkouts, not a directory.
+Plain version: trusted mode, or turning off the command sandbox, lets tools run commands on your computer, so only enable it for work you trust.
+See [project routing](docs/project-routing.md) for the policy schema, team behavior, and conversational permissions.
+Plain version: change your preferences and make authorized decisions here, then check results before accepting them, without opening more terminals.
 
 ## Deliberately not enabled
 
 Pi visibility uses the already installed `@tintinweb/pi-subagents` plugin when available.
 This project does not install third-party plugins automatically.
-There is no distributed scheduler, automatic publishing, automatic permission approval, or guarantee of exactly-once execution.
+There is no distributed scheduler, automatic publishing, or guarantee of exactly-once execution.
+Standing project authorization does not automatically answer native permission prompts or grant policy-required worker approval.
 
 This is a single-machine implementation, not a Temporal deployment.
 The supervisor survives frontend exits, but an OS restart or supervisor crash requires starting it again; binding or resuming a project in either frontend does this.
 Native voice, live model access, and Claude's idle wake behavior require interactive acceptance testing.
 No per-role dollar cap is imposed on either specialist adapter; deadlines and machine-resource limits still apply.
-Plain version: workers can inspect or edit within their granted scope, but cannot publish changes or approve themselves.
+Plain version: workers must stay within their assigned work; the supervisor does not publish changes or let workers approve themselves.
 
 ## Checks and documentation
 

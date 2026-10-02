@@ -45,26 +45,40 @@ class SetupWorkspaceTests(unittest.TestCase):
                 self.assert_rejected()
                 other.unlink()
 
-    def test_tracked_policy_changes_are_not_exempt(self):
+    def test_tracked_policy_edits_do_not_block_isolated_workers(self):
         policy = self.make_policy()
         git(self.source, "add", ".")
         git(self.source, "commit", "-qm", "track policy")
-        for staged in (False, True):
-            for deleted in (False, True):
-                with self.subTest(staged=staged, deleted=deleted):
-                    git(self.source, "reset", "--hard", "HEAD")
-                    if deleted:
-                        policy.unlink()
-                    else:
-                        policy.write_text("changed")
-                    if staged:
-                        git(self.source, "add", "--all")
-                    self.assert_rejected()
+        for index, (staged, deleted) in enumerate(
+            ((False, False), (True, False), (False, True), (True, True))
+        ):
+            with self.subTest(staged=staged, deleted=deleted):
+                git(self.source, "reset", "--hard", "HEAD")
+                if deleted:
+                    policy.unlink()
+                else:
+                    policy.write_text("changed policy")
+                if staged:
+                    git(self.source, "add", "--all")
+                from orchestrator.worker_execution import prepare_workspace
 
-    def test_staged_policy_addition_is_not_exempt(self):
+                workspace = prepare_workspace(
+                    self.root / "home", {"id": f"policy-{index}", "mode": "write"}, self.source
+                )
+                self.assertEqual(
+                    (Path(workspace["path"]) / ".orchestrator/crew-dispatch.json").read_text(),
+                    "{}\n",
+                )
+                self.assertEqual(policy.exists(), not deleted)
+
+    def test_staged_policy_addition_does_not_block_workers(self):
         self.make_policy()
         git(self.source, "add", ".")
-        self.assert_rejected()
+        workspace = self.prepare()
+        self.assertFalse((Path(workspace["path"]) / ".orchestrator/crew-dispatch.json").exists())
+        self.assertEqual(
+            git(self.source, "status", "--porcelain"), "A  .orchestrator/crew-dispatch.json"
+        )
 
     def test_source_changes_with_policy_are_not_exempt(self):
         self.make_policy()

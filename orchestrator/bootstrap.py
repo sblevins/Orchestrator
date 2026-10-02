@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config, repairable_config
 from .runtime import process_identity
 from .store import NOTE_NAMES, StateError, Store, encode, identifier
 
@@ -161,7 +161,11 @@ def bootstrap(
                 observer=bool(session["observer"]),
                 reconnect=True,
             )
-        config = load_config(home, session["project_id"])
+        config = repairable_config(home, session["project_id"])
+        repair_required = config is None
+        if repair_required:
+            config = load_config(home)
+            config["execution"]["mode"] = "restricted"
         if pid:
             identity = process_identity(pid)
             if not identity:
@@ -183,16 +187,34 @@ def bootstrap(
         from .runtime import ensure_supervisor
 
         ensure_supervisor(home)
+    trusted = config["execution"].get("mode", "restricted") == "trusted"
+    commands = config.get("commands", {})
+    if not trusted and not commands.get("enabled", False):
+        worker_commands = "disabled"
+    elif trusted or not commands.get("sandbox", True):
+        worker_commands = "enabled without an OS sandbox (host access)"
+    else:
+        worker_commands = "enabled in the OS sandbox"
     instructions = (
         (ROOT / "roles/orchestrator.md").read_text()
         + "\n\nUser preferences:\n"
         + encode(config["personalization"])
+        + "\nPlanning preferences:\n"
+        + encode(
+            {
+                "clarification": config["planning"].get("clarification", "material"),
+                "standing_execution_authorization": config["execution"].get("unattended", False),
+                "execution_mode": config["execution"].get("mode", "restricted"),
+                "worker_run_command": worker_commands,
+                "base_ref": config["execution"].get("base_ref", "HEAD"),
+            }
+        )
     )
     instructions += (
         f"\nCoordinator instance: {session_id}. Use shared tools to select/register and bind one project, "
-        "then load its notes, status, and updates. Inspect project_setup and complete open initial setup "
+        "then load its notes, status, and updates. Inspect project_setup and configure the project "
         "conversationally with setup_project before requesting workers; ask for missing user choices, "
-        "never invent defaults or hand initial setup to an operator CLI. "
+        "never invent defaults or hand project configuration to an operator CLI. "
         "Request workers only through authorized Orchestrator tools. "
         "Saved worker records do not imply that workers appear in the native sub-agent view. "
         "Describe only the visibility integration actually available in this frontend. "
@@ -218,9 +240,15 @@ def bootstrap(
             "through the installed pi-subagents plugin, using a local provider with no LLM calls. "
             "Inspect /agents for observers and final results. Live FleetView and partial text are "
             "not guaranteed. If stopped or unavailable, use observe_worker with request_id for "
-            "explicit reattachment. Never launch arbitrary native Agent work. Native Stop detaches "
+            "explicit reattachment. Never launch duplicate native work merely to obtain visibility. Native Stop detaches "
             "only the observer; cancel the real task through cancel_task. "
             "Plain version: Pi shows a helper that reads the existing job, without another AI worker."
+        )
+    if repair_required:
+        instructions += (
+            "\nThe bound project's configuration is invalid, so the preferences above are shared "
+            "restricted defaults. Other tools stay blocked until you inspect project_settings and "
+            "repair it with configure_project."
         )
     instructions += "\nInstance state: " + encode(session)
     if session["project_id"]:

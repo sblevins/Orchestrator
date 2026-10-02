@@ -129,7 +129,7 @@ class Store:
             raise StateError("The state database must not be a symlink")
         with contextlib.closing(self.connect()) as database:
             version = database.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise StateError(f"Unsupported database schema {version}; refusing to downgrade")
             database.execute("PRAGMA journal_mode=WAL")
             database.executescript(SCHEMA)
@@ -519,7 +519,11 @@ class Store:
 
             WorkerService(self)._origin(database, project_id, origin_event_id, "planning")
             if database.execute(
-                "SELECT 1 FROM worker_requests WHERE origin_event_id=? AND plan_id IS NULL",
+                "SELECT 1 FROM worker_requests w WHERE origin_event_id=? AND plan_id IS NULL "
+                "AND NOT EXISTS(SELECT 1 FROM worker_group_members m "
+                "JOIN worker_requests parent ON parent.id=m.parent_request_id "
+                "WHERE m.child_request_id=w.id AND parent.plan_id IS NOT NULL "
+                "AND parent.project_id=w.project_id AND parent.origin_event_id=w.origin_event_id)",
                 (origin_event_id,),
             ).fetchone():
                 raise StateError(
@@ -944,6 +948,17 @@ class Store:
             ).fetchone()
             if not project or project["next_monitor_at"] > now():
                 return None
+            from .config import load_config
+            from .monitoring import should_review
+
+            monitoring = load_config(self.home, project_id).get("monitoring", {})
+            if not should_review(
+                database,
+                project_id,
+                monitoring.get("quiet_seconds", 20),
+                monitoring.get("foreground_stale_seconds", 900),
+            ):
+                return None
             if database.execute(
                 "SELECT 1 FROM tasks WHERE project_id=? AND role='monitor' AND state IN ('queued','starting','running')",
                 (project_id,),
@@ -980,6 +995,16 @@ class Store:
     ) -> dict | None:
         try:
             with self.transaction() as database:
+                from .monitoring import should_review
+
+                monitoring = config.get("monitoring", {})
+                if not should_review(
+                    database,
+                    project_id,
+                    monitoring.get("quiet_seconds", 20),
+                    monitoring.get("foreground_stale_seconds", 900),
+                ):
+                    return None
                 task_id = self._enqueue(
                     database,
                     project_id,
@@ -998,14 +1023,21 @@ class Store:
         except sqlite3.IntegrityError:
             return None
 
-    def approve_plan(self, plan_id: str) -> None:
+    def approve_plan(self, plan_id: str, reason: str | None = None) -> None:
         with self.transaction() as database:
             plan = database.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
             if not plan or plan["status"] != "reviewed":
                 raise StateError("Only the current independently reviewed plan can be approved")
-            if database.execute(
-                "SELECT 1 FROM holds WHERE project_id=? AND resolved IS NULL", (plan["project_id"],)
-            ).fetchone():
+            from .config import load_config
+
+            permissions = load_config(self.home, plan["project_id"]).get("permissions", {})
+            if (
+                permissions.get("enforce_monitor_holds", True)
+                and database.execute(
+                    "SELECT 1 FROM holds WHERE project_id=? AND resolved IS NULL",
+                    (plan["project_id"],),
+                ).fetchone()
+            ):
                 raise StateError("Resolve blocking monitor findings before approving")
             project = database.execute(
                 "SELECT monitor_cursor FROM projects WHERE id=?", (plan["project_id"],)
@@ -1025,7 +1057,7 @@ class Store:
                 database,
                 plan["project_id"],
                 "plan.approved",
-                {"plan_id": plan_id, "version": plan["version"]},
+                {"plan_id": plan_id, "version": plan["version"], "reason": reason},
                 plan["session_id"],
                 notify=True,
             )

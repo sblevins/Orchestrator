@@ -1,117 +1,107 @@
 # Worker routing and execution contract
 
-This is the implementation contract for the current worker-router change.
-The user has authorized implementing workers, but will configure worker profiles inside each project.
-No active worker model or effort defaults are to be supplied.
-The four existing core roles retain their configured models and efforts.
-Shared supervisor safeguards remain; no per-role dollar budgets, timeouts, CPU, or memory fields return.
+This document records implementation boundaries for worker routing and execution.
+See [project routing](project-routing.md) for the current conversational API and policy schema, and [workers](workers.md) for operational behavior.
+The original single-worker implementation remains the foundation, but its monitor-only planned selection and operator-only approval restrictions no longer describe current behavior.
+Worker models come from project policy, not automatically populated defaults.
+The four core roles retain configured models and efforts; shared supervisor safeguards do not add per-role dollar budgets, timeouts, CPU, or memory fields.
 
 ## Scope and authority
 
-Enable the routing and worker capabilities independently of policy availability.
-Without a valid configured policy, work remains blocked rather than guessing a profile.
-Load FirstMate-compatible JSON from `<project-root>/.orchestrator/crew-dispatch.json`, falling back to `<home>/config/crew-dispatch.json` only when the project file is absent.
-An invalid project policy must not silently fall back.
-Rules are best-fit natural-language guidelines interpreted by the existing model roles, not ordered keyword matches and not a new router model.
+Enable routing and workers independently of policy availability; missing policy blocks selection rather than guessing a profile.
+Load project `.orchestrator/crew-dispatch.json` before the home fallback, and never fall back from invalid project policy.
+Support named classifications containing one profile or a read-only comparison team, plus legacy FirstMate-compatible rules/default.
+The coordinator interprets classification and difficulty; legacy natural-language rules are best-fit guidelines, not keyword matches or a separate routing model.
+The bound coordinator may select planned and on-demand workers while preserving project, plan, node, and original user-event identities.
+The monitor may select only supplied pending legacy plan requests through its accepted result.
+Without unattended authorization, classification suggestions become `worker.routing_recommended` notifications and final effort remains the coordinator's decision.
+With unattended authorization, classification recommendations can select pending planned workers using configured profile effort or `execution.worker_difficulty`, never model-invented effort.
+Explicit policy-match overrides remain a separate CLI-only capability, never a model-supplied authority label.
+Plain version: preserve who requested the work and which plan it belongs to, while letting the coordinator choose its configured workers.
 
-The slow monitor chooses plan-associated workers, through its accepted result only.
-The foreground coordinator chooses unrelated workers through the project-scoped API.
-Explicit operator overrides are a separate CLI-only authority, never a model-supplied role label.
-Pin concrete harness/model/effort and the policy digest before dispatch; do not silently change providers on failure.
-Arrays must honor evidence and quota constraints or escalate rather than inventing a ranking.
-Use Claude Code only for Anthropic models and Pi for all other models, for both core roles and workers.
-Pi profiles pin a provider, model, and supported thinking level.
-Direct Codex execution is not an enabled route; recognizing another FirstMate harness in the policy does not implement its executor.
-Reject unsupported effort levels rather than silently lowering them.
+Pin concrete harness/model/effort and policy provenance before dispatch, with no silent provider fallback.
+Use Claude Code for Anthropic specialists and Pi with an explicit provider for other models.
+Reject unsupported effort rather than lowering it silently.
+Legacy quota-dependent arrays require trusted evidence and are not comparison teams.
+Classification difficulty mappings and supported profile schemas are documented in [project routing](project-routing.md#classifications-and-difficulty).
 
-Read workers are read-only.
-Write workers require an operator-approved write-capable plan node or explicit operator approval of the individual request.
-A FirstMate `approval: captain` rule always adds operator approval, including within an approved plan.
-Workers may write only in an isolated Git worktree, never the user's source checkout.
-Claude write workers get restricted file-edit tools, not unrestricted Bash.
-Pi write workers receive only controlled file tools, without Bash or unreviewed extensions.
-Pi is not an operating-system sandbox; isolate its configuration and enforce project path limits in owned tools before enabling writes.
-No automatic merge or push into the user's working branch.
-
-A successful harness produces a candidate result, not accepted completion.
-An operator accepts results with a CLI command after reviewing the saved output/worktree/diff.
-Only acceptance completes the graph node and releases its dependents.
-Approval nodes require a separate operator action and cannot launch workers.
-A failed prerequisite blocks or cancels dependent readiness according to the existing preference.
+Read workers are read-only; write workers edit only isolated Git worktrees, never the source checkout.
+Workers expose controlled file tools; trusted workers and command-enabled restricted workers additionally expose owned `run_command` for command and test execution.
+Trusted mode always runs worker commands without an OS sandbox; restricted mode runs them in the OS sandbox unless the project explicitly sets `commands.sandbox = false`, which also runs them on the host without an OS sandbox.
+File-tool path containment does not constrain unsandboxed commands.
+These controls are not an operating-system sandbox against hostile same-user processes.
+There is no automatic merge or push.
+Permissions default to conversational coordinator approvals enabled, general write approval not required, and monitor holds enforced; these are project-local configurable preferences.
+A routing rule's explicit approval requirement and policy-match overrides still require approval.
+Plan approval still requires independent review and fresh monitor evidence.
+Successful execution produces a candidate, not accepted completion; checked acceptance releases dependencies.
+Standing `execution.unattended` authorization approves reviewed plans and accepts candidates only with an explicit empty `remaining_issues` list and satisfied live gates.
+It never supplies explicit worker approval required by policy, including security-audit teams.
+Approval nodes cannot launch workers, and failed prerequisites block or cancel dependents according to configuration.
 Unknown outcomes are never automatically replayed.
-Active mid-turn steering is outside this first execution increment; cancellation and explicit follow-up requests remain available.
 
-## Policy module: `orchestrator.routing`
+## Policy and project configuration modules
 
-- `RoutingError(ValueError)` provides actionable reasons.
-- `validate_policy(value) -> dict` returns a defensive validated copy of FirstMate's `rules`/`default` structure.
-- `load_policy(home, project_root) -> dict` returns `{policy, digest, source}`; missing or invalid policies raise `RoutingError` without a guessed default.
-- `resolve_selection(policy, choice, *, evidence=None, operator_override=False) -> dict` validates the selector's decision and returns a concrete profile plus provenance and `requires_approval`.
-- `choice` for normal decisions contains `rule` (zero-based integer or `default`), `candidate` (zero-based, default 0 for a single profile), `model`, `effort`, and nonempty `rationale`; optional `confidence` supports an explicit rule threshold.
-- Explicit profile model/effort must match; omitted axes must be resolved explicitly by the selector, not inherited opaquely from a foreground model.
-- Maximum effort requires an explicit policy preference or operator override.
-- Operator override choices contain concrete `harness`, `model`, `effort`, and `rationale` and bypass policy matching, not execution/approval gates.
-- Return profile fields `harness`, `model`, `effort`, optional `provider`, `rule`, `candidate`, `rationale`, `requires_approval`, and any disclosed evidence/uncertainty.
-- `capture_quota_evidence() -> dict` supplies bounded program-captured evidence or a disclosed unavailable state; model-provided quota measurements are not authoritative.
+`orchestrator.routing` validates classifications, difficulty mappings, legacy rules/default, and concrete selections without interpreting task prose.
+`validate_policy` returns a defensive validated copy, and `load_policy` returns policy, digest, and source without a guessed default.
+`resolve_selection` checks the caller's classification or legacy choice and returns a concrete profile or team with provenance and disclosed uncertainty.
+Difficulty or exact effort may override optional profile effort; model, harness, and provider still come from the configured classification.
+`capture_quota_evidence` reports unavailable evidence until a trusted adapter exists; model-reported quota numbers are not authoritative.
 
-## Execution module: `orchestrator.worker_execution`
+`orchestrator.onboarding` supports repeatable project-local policy saves, incomplete drafts, and repair without a permanent setup seal.
+`orchestrator.project_settings` validates partial settings and writes only the bound project's private JSON override, never global/local/default configuration or another project.
+Arbitrary executable commands are not conversational settings because their effects need not stay within a project.
+Role/model settings are captured for tasks, while permissions, concurrency, and worker/routing disable settings remain live at enforcement points.
+Plain version: future tasks can use new model choices, while current permission and scheduling rules still control what may proceed.
 
-- `build_worker_command(config, profile, mode, prompt, cwd, output_path, *, project_root=None) -> list[str]` uses stdin prompts and explicit axes; mode is `read` or `write`.
-- `prepare_workspace(home, request, project_root, dependency_commits=()) -> dict` creates an isolated Git worktree for write work and returns its path and repository/base/branch provenance.
-- A write project must be a Git repository with a clean source checkout; no stashing or overwriting user changes.
-- Accepted dependency commit IDs are applied to the isolated workspace; conflicts fail visibly without changing the source checkout.
-- `capture_workspace(workspace) -> dict` records a bounded diff artifact, file list and commit provenance after the worker exits.
-- Internal result commits remain local, signed by the centrally configured identity; no identity overrides or signing bypass.
-- Git commands must disable hooks and external diff/textconv for controlled artifact operations, and protect workspace metadata from path redirection.
-- Non-Git read-only work is supported without creating a write workspace.
+## Execution and workspace boundaries
 
-## Durable service: `orchestrator.workers.WorkerService(store)`
+`orchestrator.worker_execution` builds restricted harness commands and prepares isolated workspaces with repository, base, branch, and dependency provenance.
+Snapshot preparation rejects dirty source state except sole regular routing-policy additions, modifications, or deletions, including tracked and staged changes.
+No stash, source commit, ignore rule, or Git exclude change is needed for that policy exception.
+Accepted dependency commits are applied only to isolated workspaces; conflicts fail without changing the source checkout.
+Bounded diffs and signed local candidate commits capture results; centrally configured identity and signing are never overridden or bypassed.
+Controlled Git operations disable hooks and external diff/textconv and reject unsafe metadata paths, filters, and merge drivers.
+Ordinary non-Git read-only work remains supported; comparison teams require a frozen Git baseline.
+Plain version: keep source changes separate and preserve evidence of exactly which files each worker saw and changed.
 
-Use additive schema migration version 2, never resetting `user_version` to 1 when reopening.
-Add worker policy snapshots and requests, a nullable worker-request link on tasks, and an optional origin-event link on plans.
-Preserve existing projects, jobs, inboxes, and notes.
-Requests retain immutable project/plan/node/mode/origin relationships, selected policy/provenance, approval, task link, workspace and result state.
-Use transactions and generation/state checks for all authority transitions.
+## Durable worker and team services
 
-Methods used by the parent integration:
+The original single-worker foundation added schema migration version 2, worker policy snapshots and requests, task links, and plan origin links.
+That is historical migration context, not an instruction to reset the current schema version or a complete schema for team support.
+Current migrations and tables are defined in `orchestrator/workers.py` and `orchestrator/teams.py`; preserve existing projects, jobs, inboxes, and notes.
+Requests retain immutable ownership and origin relationships, policy provenance, approval, task links, workspaces, and results.
+Use transactions and generation/state checks for authority transitions.
 
-- `request(session_id, brief, mode='read', *, origin_event_id, plan_id=None, node_id=None, idempotency_key=None) -> dict`
-- `get(request_id) -> dict` and `list(project_id) -> list[dict]`
-- `policy(project_id) -> dict` exposes current policy status and shared procedure, not credentials.
-- `select(session_id, request_id, choice) -> dict` permits unrelated requests only.
-- `override(request_id, choice) -> dict` is operator-only; never expose through MCP/Pi.
-- `approve(request_id, reason) -> dict` authorizes a pending individual request through the operator CLI.
-- `accept(request_id, reason) -> dict` accepts a completed candidate result and completes its graph node.
-- `approve_node(plan_id, node_id, reason) -> dict` handles approval-only nodes with dependency and hold checks.
-- `refresh(session_id, request_id) -> dict` explicitly refreshes a not-running request's policy snapshot, invalidating its old choice/approval.
-- `seed_plan(plan_id) -> None` creates durable requests for non-approval nodes of an approved plan, without launching before dependencies are accepted.
-- `monitor_requests(project_id, cursor) -> list[dict]` returns pending plan-related choices and immutable policy/evidence context.
-- `apply_monitor_selections(database, task, selections) -> None` runs in the same transaction as monitor findings/cursor acceptance; validate IDs actually supplied in that saved task prompt, current plan version, policy digest, and the persisted successful monitor task.
-- `dispatch_ready() -> None` enqueues authorized requests atomically, respecting plan versions, graph readiness, holds, pauses, concurrency, policy freshness, and mode permissions.
-- `start_check(task) -> dict` rechecks the saved worker grant before the runtime invokes a harness.
-- `record_workspace(task, workspace) -> None` saves program-generated provenance against the current attempt token.
-- `process_result(task) -> None` validates a terminal worker's structured report, exposes a candidate or failure, advances no successful graph node without acceptance, and marks processing atomically.
+`WorkerService.select` supports bound planned and on-demand requests and automatically refreshes unattempted selections to current policy, clearing prior approval.
+Explicit refresh also invalidates the old choice and approval where the request remains eligible.
+Queued and running jobs retain captured selections; later policy edits do not revoke or replay them.
+Attempted requests cannot be blindly refreshed or reselected.
+`approve`, `accept`, and `approve_node` are available through authorized project-scoped APIs as well as optional CLI commands; `override` remains CLI-only.
+Dispatch and start checks enforce current ownership, dependencies, applicable holds and permissions, pauses, concurrency, and enable/disable controls.
+Runtime config and concrete profile snapshots do not justify ignoring those live checks.
+Monitor result processing validates supplied request context and atomically accepts findings, holds, recommendations or legacy selections, cursor, and processed acknowledgment.
+Language meaning still requires judgment; software cannot prove arbitrary prose is unrelated work.
 
-The existing Store enqueue/claim/heartbeat paths must reject worker jobs without a valid linked request and recheck execution gates.
-Plan associations determine selection authority; caller-supplied role names cannot grant monitor authority.
-Associate planning with its original user event so the same event cannot be relabeled as unrelated work to bypass routing ownership.
-Language meaning still requires judgment; do not claim software can prove that arbitrary prose is unrelated.
+Teams use ordinary durable child requests for two rounds over the same frozen Git commit and accepted dependencies.
+Round two receives complete untrusted round-one reports, never new instructions or permissions.
+Live durable `send_team_message` and `read_team_messages` tools also permit registered peers to exchange untrusted data during active attempts.
+Normal concurrency and resource limits apply, so four peers produce eight jobs, not eight simultaneous processes.
+Only parent acceptance can release the associated graph node; children cannot independently authorize completion.
+Cancellation applies to the parent and children, with terminal confirmation and no blind replay of uncertain outcomes.
+See [project routing](project-routing.md#read-only-comparison-teams) for team bounds and evidence behavior.
 
 ## Runtime and transport integration
 
-After processing role results, seed approved plans and dispatch eligible selected worker requests.
-Include pending plan routing requests and program-captured policy/evidence in monitor task prompts.
-Monitor output accepts an optional `worker_selections` array of `{request_id, choice}`; legacy findings-only responses remain valid.
-Accept findings, holds, selections, cursor, and processed acknowledgment in one transaction.
+Seed approved plan requests and dispatch eligible selections without bypassing graph readiness.
+Worker tasks capture request identity, concrete profile, mode, project root, and accepted dependency inputs.
+Core role configuration remains orchestrator/planner/critic/monitor; workers use `roles/worker.md` and shared supervisor limits.
+Reports have the strict shape `{summary: string, changes: [string], checks: [string], remaining_issues: [string]}` and are stored alongside program-captured provenance.
+Report claims do not independently prove tests passed.
 
-Worker task config contains a `worker` object with request ID, concrete profile, mode, project root, and accepted dependency commits.
-Core role configuration remains exactly orchestrator/planner/critic/monitor.
-Worker runtime uses `roles/worker.md`, explicit executor settings and shared supervisor limits.
-Its report is strict JSON `{summary: string, changes: [string], checks: [string], remaining_issues: [string]}`.
-Store this alongside program-captured workspace/diff provenance.
-Claims in the report do not independently prove tests passed.
-
-Expose policy inspection, request/get/list, unrelated selection, and policy refresh through the common API/MCP/Pi bridge.
-Approval, override, acceptance, and approval-node completion remain operator CLI actions.
-Keep the native foreground tool guards: workers launch through the supervisor, not native untracked agent tools.
-Update role instructions, documentation, the public explainer, and tests to distinguish enabled capabilities from an unconfigured project policy.
+Expose project-scoped setup/settings, policy inspection, request/get/list, planned and on-demand selection, refresh, approvals, acceptance, and cancellation through the common API/MCP/Pi bridge.
+Keep foreground tool guards in guarded mode; trusted mode explicitly enables native foreground tools.
+Conversational configuration cannot replace adapter/frontend executables.
+Native observers display already dispatched workers and team children without owning execution or opening Herder windows.
+Project ownership, dependency correctness, source isolation, credential limits, and no unknown-outcome retry remain intrinsic boundaries even when optional gates are disabled.
+Plain version: the coordinator can make authorized decisions in chat, but every worker stays tracked and every accepted result still needs evidence.

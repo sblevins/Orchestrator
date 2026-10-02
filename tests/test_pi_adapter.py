@@ -14,7 +14,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from orchestrator.adapters import AdapterError, build_pi_command, parse_result
-from orchestrator.pi_tools import FileBroker, PolicyError, trusted_installation
+from orchestrator.pi_tools import AuthorityError, FileBroker, PolicyError, trusted_installation
 
 BRIDGE = Path(__file__).resolve().parents[1] / "orchestrator" / "pi_bridge.mjs"
 BROKER = BRIDGE.with_name("pi_tools.py")
@@ -188,6 +188,54 @@ class BrokerTests(unittest.TestCase):
                 self.broker.execute(name, {})
         with self.assertRaises(PolicyError):
             self.broker.execute("write", {"path": str(self.source / "new"), "content": "no"})
+
+    def test_restricted_read_follows_in_project_instruction_alias(self):
+        (self.source / "AGENTS.md").write_text("Project instructions")
+        (self.source / "CLAUDE.md").symlink_to("AGENTS.md")
+        (self.source / ".env").write_text("private-sentinel")
+        (self.source / "notes.md").symlink_to(".env")
+        (self.root / "outside.md").write_text("private-sentinel")
+        (self.source / "outside.md").symlink_to(self.root / "outside.md")
+        broker = FileBroker({"cwd": str(self.source), "mode": "read"})
+        try:
+            self.assertEqual(broker.execute("read", {"path": "CLAUDE.md"}), "Project instructions")
+            for alias in ("notes.md", "outside.md"):
+                with self.subTest(alias=alias), self.assertRaises(AuthorityError):
+                    broker.execute("read", {"path": alias})
+        finally:
+            broker.close()
+        (self.worktree / "target.txt").write_text("worktree target")
+        (self.worktree / "alias.txt").symlink_to("target.txt")
+        with self.assertRaises(PolicyError):
+            self.broker.execute("write", {"path": "alias.txt", "content": "redirected"})
+        self.assertEqual((self.worktree / "target.txt").read_text(), "worktree target")
+
+    def test_trusted_credential_files_are_excluded(self):
+        broker = FileBroker(
+            {
+                "cwd": str(self.worktree),
+                "project_root": str(self.source),
+                "mode": "write",
+                "trusted": True,
+            }
+        )
+        try:
+            for name in (
+                ".git-credentials",
+                ".pgpass",
+                "_netrc",
+                ".docker/config.json",
+                ".kube/config",
+                "id_ecdsa",
+                "id_dsa",
+                "id_rsa",
+            ):
+                for tool in ("read", "write"):
+                    with self.subTest(name=name, tool=tool), self.assertRaises(AuthorityError):
+                        broker.execute(tool, {"path": name, "content": "secret"})
+            broker.execute("write", {"path": ".github/workflows/test.yml", "content": "ok"})
+        finally:
+            broker.close()
 
     def test_read_private_run_directory_is_not_exposed(self):
         (self.worktree / "task-metadata.json").write_text("private")
@@ -461,11 +509,8 @@ class PiInstalledE2ETests(unittest.TestCase):
         self.assertEqual(parse_result("pi", result.stdout, 0)["text"], "written")
         self.assertFalse((self.source / "result.txt").exists())
 
-    def test_forbidden_operation_fails_even_if_model_recovers(self):
-        for tool, arguments in (
-            ("bash", {"command": "touch forbidden"}),
-            ("read", {"path": str(self.auth)}),
-        ):
+    def test_unoffered_operation_fails_even_if_model_recovers(self):
+        for tool, arguments in (("bash", {"command": "touch forbidden"}),):
             self.requests.clear()
             responses = [
                 {

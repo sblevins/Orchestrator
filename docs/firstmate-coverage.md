@@ -15,7 +15,7 @@ No First Mate code was copied into this implementation.
 - Background supervision: detached runners, bounded monitor calls, resumable Claude monitor conversations, fresh Pi tasks, and cheap polling between calls.
 - User-dialog mirroring: complete saved prompts, conservative review classification, and recorded consequential decisions.
 - Failure handling: cancellation, deadlines, process-start identity checks, unknown-outcome reporting, monitor cooldowns, and no blind replay.
-- Human control: blocking findings, explicit approval commands, project pause, and no model-facing approval tool.
+- Project control: configurable permission gates, blocking findings, project pause, and bound conversational approval and acceptance tools with explicit reasons.
 - Narrow host integration: native Claude lifecycle hooks, bounded async wake, optional preview MCP channels, and an owned Pi bridge.
 - Resource discipline and diagnostics: shared machine reservations, role configuration snapshots, private bounded logs, doctor output, and rotating SQLite backups.
 
@@ -28,14 +28,22 @@ Plain version: important messages and job records survive interruptions, but not
 The planning pipeline separates planner, critic, and ongoing monitor responsibilities.
 The program validates dependency graphs before critique and calculates readiness from actual dependency states and approval nodes.
 Configuration supports local and per-project preferences, replaceable workflow templates, and arbitrary future core-role model identifiers.
+The bound coordinator can repeatedly repair routing and patch private project settings, including validated named graph templates, without modifying shared defaults or another project.
+Role/model choices are captured for tasks; permissions, concurrency, and worker/routing disable settings remain live.
 The monitor cannot hide a blocking finding by acknowledging a notification.
 Routine status prompts are saved without automatically paying for a deep review.
 
-FirstMate-compatible project profiles now guide worker selection, with no automatically populated model defaults.
-The monitor selects plan workers; the orchestrator selects unrelated workers, both using best-fit natural-language rules rather than ordered keyword matches.
-Workers are tracked background sub-agents, without terminal tabs, and code changes remain in isolated worktrees until separately reviewed and integrated.
-Program-enforced approval and acceptance gates prevent models from releasing their own dependencies.
-Plain version: workers follow your policy and keep their changes separate until you accept them.
+Project classifications and legacy FirstMate-compatible rules/default guide selection without automatically populated model defaults.
+The coordinator selects planned and on-demand workers while preserving their origins, with classification difficulty or exact effort chosen explicitly.
+The monitor still selects supplied pending legacy plan workers.
+Classification suggestions become `worker.routing_recommended` notifications unless unattended authorization permits selection using configured profile effort or `execution.worker_difficulty`.
+Read-only Git comparison teams run two rounds under ordinary concurrency over the same frozen commit and accepted dependencies, comparing complete untrusted reports without guaranteed consensus.
+Live durable send/read tools also let peers exchange messages as untrusted data, never new instructions or permissions.
+Workers and team children are tracked background sub-agents with native observers, without new terminal tabs.
+Code changes remain in isolated worktrees until separately reviewed and integrated.
+Authorized coordinator APIs handle project approvals, while checked result acceptance and dependency enforcement remain mandatory; teams are accepted through their parent only.
+See [project routing](project-routing.md) for schemas, configurable permissions, and intrinsic boundaries.
+Plain version: configure and direct workers here in chat, then check their results before accepting work that later tasks need.
 
 ## Deferred or intentionally excluded
 
@@ -43,11 +51,12 @@ Quota-dependent candidate arrays, floors, and quota-balanced choices fail closed
 Active mid-turn steering, automated test execution, automatic shipping, forge workflows, quota-aware account failover, and worker cost aggregation are not implemented.
 
 Fleet hierarchies, cross-home handoffs, task-axi/Beads adoption, automatic tool updates, social integrations, custom voice services, and third-party Pi graph plugins are not required for the initial local coordinator.
-No plugin choice has been made for the user.
+Pi visibility uses the already installed sub-agent observer integration when available; this project does not install third-party plugins for the user.
 A visual graph editor and distributed durability through Temporal are also not implemented.
 The current program exposes a validated graph and readiness through tools and the CLI.
 
-The pirate persona, terminal keystroke injection, implicit approval, unrestricted specialist shell tools, and silent model fallback are intentionally excluded.
+The pirate persona, terminal keystroke injection, implicit approval, unrestricted core-specialist shell tools, and silent model fallback are intentionally excluded.
+Trusted workers can run commands through owned `run_command`; standing `execution.unattended` authorization permits eligible plan approval and candidate acceptance without granting policy-required worker approval.
 Native Claude voice is retained rather than replaced.
 
 ## Correction to the earlier research

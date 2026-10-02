@@ -1,7 +1,7 @@
 """Pure policy validation and selection gates, without a routing model.
 
 The caller chooses the best-fitting natural-language rule. This module never
-interprets task prose, chooses defaults for omitted axes, or changes executors.
+interprets task prose or changes configured executors or models.
 Quota-dependent selections remain blocked until a supported evidence adapter is
 available: an arbitrary dictionary of model-reported numbers is not evidence.
 """
@@ -23,12 +23,95 @@ class RoutingError(ValueError):
 
 
 _PROVIDER = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-_POLICY_EFFORTS = {"off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+_POLICY_EFFORTS = {
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "max-supported",
+    "ultra",
+}
 _EXECUTOR_EFFORTS = {
-    "pi": {"off", "minimal", "low", "medium", "high", "xhigh"},
+    "pi": {"off", "minimal", "low", "medium", "high", "xhigh", "max", "max-supported"},
     "claude": {"low", "medium", "high", "xhigh", "max"},
 }
 _MAX_POLICY_BYTES = 1024 * 1024
+_PROFILE_KEYS = ("harness", "model", "provider", "effort", "floor")
+_CONFIRMATIONS = {"user", "captain"}
+_DEFAULT_DIFFICULTY_LEVELS = {
+    "easy": {"claude": "low", "pi": "low"},
+    "hard": {"claude": "high", "pi": "high"},
+    "very-hard": {"claude": "max", "pi": "max-supported"},
+}
+
+
+def _difficulty(value, context):
+    _text(value, context)
+    normalized = re.sub(r"[\s_-]+", "-", value.strip().lower())
+    if normalized not in _DEFAULT_DIFFICULTY_LEVELS:
+        raise RoutingError(f"{context} must be easy, hard, or very-hard")
+    return normalized
+
+
+def _effort(profile, choice, policy, fallback_difficulty=None):
+    if "effort" in choice and "difficulty" in choice:
+        raise RoutingError("choice.effort and choice.difficulty are alternatives; supply only one")
+    difficulty = choice.get("difficulty")
+    if difficulty is None and "effort" not in choice and "effort" not in profile:
+        difficulty = fallback_difficulty
+    if difficulty is not None:
+        difficulty = _difficulty(difficulty, "choice.difficulty")
+        harness = profile["harness"]
+        return (
+            policy.get("difficulty_levels", {})
+            .get(difficulty, {})
+            .get(harness, _DEFAULT_DIFFICULTY_LEVELS[difficulty].get(harness))
+        )
+    effort = choice.get("effort", profile.get("effort"))
+    return "max" if effort == "max-supported" and profile["harness"] == "claude" else effort
+
+
+def _classification_profiles(value, context):
+    if not isinstance(value, dict):
+        raise RoutingError(f"{context} must be a profile or an object containing team")
+    if "approval" in value and value["approval"] not in _CONFIRMATIONS:
+        raise RoutingError(
+            f"{context}.approval must be user or captain (explicit worker confirmation)"
+        )
+    if "team" in value:
+        if set(value) - {"team", "approval", "description"}:
+            raise RoutingError(f"{context} supports team, approval and description")
+        if "description" in value:
+            _text(value["description"], f"{context}.description")
+        profiles = value["team"]
+        if not isinstance(profiles, list) or not 2 <= len(profiles) <= 8:
+            raise RoutingError(f"{context}.team must contain 2 to 8 distinct profiles")
+        context += ".team"
+    else:
+        profiles = [{key: item for key, item in value.items() if key != "approval"}]
+    seen = set()
+    for index, profile in enumerate(profiles):
+        location = f"{context}[{index}]"
+        if isinstance(profile, dict) and "team" in profile:
+            raise RoutingError(f"{location}.team cannot be nested")
+        _profiles(profile, location)
+        if not isinstance(profile, dict):
+            raise RoutingError(f"{location} must be a profile object")
+        _identifier(profile.get("model"), f"{location}.model")
+        if profile["harness"] == "pi":
+            _provider(profile.get("provider"), f"{location}.provider")
+        axes = (
+            profile["harness"],
+            profile.get("provider", "anthropic" if profile["harness"] == "claude" else None),
+            normalize_model(profile["model"]),
+        )
+        if axes in seen:
+            raise RoutingError(f"{context} contains duplicate team peers (harness/provider/model)")
+        seen.add(axes)
+    return profiles
 
 
 def _text(value, context):
@@ -72,6 +155,15 @@ def _profiles(value, context):
         location = f"{context}[{index}]"
         if not isinstance(profile, dict):
             raise RoutingError(f"{location} must be a profile object")
+        if "team" in profile:
+            raise RoutingError(f"{location}.team is only supported in classifications")
+        unknown = sorted(set(profile) - set(_PROFILE_KEYS))
+        if unknown:
+            raise RoutingError(
+                f"{location} has unsupported keys {unknown}; a profile supports only "
+                f"{', '.join(_PROFILE_KEYS)}. Put approval on the rule or classification, "
+                "and correct misspelled keys so no requirement is silently ignored"
+            )
         _identifier(profile.get("harness"), f"{location}.harness")
         if "model" in profile:
             _identifier(profile["model"], f"{location}.model")
@@ -125,6 +217,35 @@ def validate_policy(value) -> dict:
         policy = deepcopy(value)
     except (TypeError, ValueError, RecursionError) as error:
         raise RoutingError("Policy must contain only finite JSON values") from error
+    if "difficulty_levels" in policy:
+        levels = policy["difficulty_levels"]
+        if not isinstance(levels, dict):
+            raise RoutingError(
+                "difficulty_levels must map difficulty names to harness effort objects"
+            )
+        normalized_levels = {}
+        for name, mapping in levels.items():
+            context = f"difficulty_levels.{name}"
+            normalized = _difficulty(name, context)
+            if normalized in normalized_levels:
+                raise RoutingError(f"{context} duplicates a normalized difficulty")
+            if not isinstance(mapping, dict) or not mapping:
+                raise RoutingError(f"{context} must be a nonempty harness effort object")
+            for harness, effort in mapping.items():
+                if harness not in _EXECUTOR_EFFORTS:
+                    raise RoutingError(f"{context}.{harness} is an unsupported harness")
+                _identifier(effort, f"{context}.{harness}")
+                if effort not in _EXECUTOR_EFFORTS[harness]:
+                    raise RoutingError(f"{context}.{harness} has unsupported effort {effort!r}")
+            normalized_levels[normalized] = mapping
+        policy["difficulty_levels"] = normalized_levels
+    if "classifications" in policy:
+        classifications = policy["classifications"]
+        if not isinstance(classifications, dict):
+            raise RoutingError("classifications must map classification names to profiles or teams")
+        for name, profiles in classifications.items():
+            _text(name, "classifications name")
+            _classification_profiles(profiles, f"classifications.{name}")
     rules = policy.get("rules", [])
     if not isinstance(rules, list):
         raise RoutingError("Policy rules must be an array")
@@ -146,8 +267,8 @@ def validate_policy(value) -> dict:
             raise RoutingError(f"{context}.select must be quota-balanced")
     if "default" in policy:
         _profiles(policy["default"], "default")
-    if "rules" not in policy and "default" not in policy:
-        raise RoutingError("Policy must contain rules and/or default")
+    if not any(key in policy for key in ("rules", "default", "classifications")):
+        raise RoutingError("Policy must contain classifications, rules, and/or default")
     return policy
 
 
@@ -273,12 +394,16 @@ def capture_quota_evidence() -> dict:
     }
 
 
-def resolve_selection(policy, choice, *, evidence=None, operator_override=False) -> dict:
+def resolve_selection(
+    policy, choice, *, evidence=None, operator_override=False, fallback_difficulty=None
+) -> dict:
     """Validate a caller's best-fit decision, without choosing a rule for them.
 
     `evidence` is reserved for program-captured quota adapters. Caller-supplied
     metrics cannot currently unblock quota gates. Operator overrides bypass
     policy matching, but never executor validation or operator approval.
+    A choice's difficulty or effort overrides configured effort; the program's
+    `fallback_difficulty` only fills profiles that configure no effort.
     """
     if not isinstance(choice, dict):
         raise RoutingError("Selection must be an object")
@@ -288,7 +413,12 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
         )
     _text(choice.get("rationale"), "choice.rationale")
     for axis in ("model", "effort"):
-        _identifier(choice.get(axis), f"choice.{axis}")
+        if axis in choice:
+            _identifier(choice[axis], f"choice.{axis}")
+    if "difficulty" in choice:
+        _difficulty(choice["difficulty"], "choice.difficulty")
+    if "difficulty" in choice and "effort" in choice:
+        raise RoutingError("choice.effort and choice.difficulty are alternatives; supply only one")
     if "provider" in choice:
         _provider(choice["provider"], "choice.provider")
     if "confidence" in choice:
@@ -296,10 +426,14 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
     rule = {}
     if operator_override:
         _identifier(choice.get("harness"), "choice.harness")
-        profile = {key: choice[key] for key in ("harness", "model", "effort")}
+        _identifier(choice.get("model"), "choice.model")
+        profile = {key: choice[key] for key in ("harness", "model")}
+        profile["effort"] = _effort(profile, choice, {})
         rule_index, candidate_index = "override", None
     else:
         policy = validate_policy(policy)
+        if "classification" in choice:
+            return _resolve_classification(policy, choice, fallback_difficulty)
         rule_index = choice.get("rule")
         if rule_index == "default":
             if "default" not in policy:
@@ -323,7 +457,7 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
             )
         configured = candidates[candidate_index]
         profile = {"harness": configured["harness"]}
-        for axis in ("harness", "model", "effort", "provider"):
+        for axis in ("harness", "model", "provider"):
             configured_value = configured.get(axis)
             chosen_value = choice.get(axis)
             if axis == "model":
@@ -331,16 +465,13 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
                 chosen_value = normalize_model(chosen_value)
             if axis in configured and axis in choice and configured_value != chosen_value:
                 raise RoutingError(
-                    f"choice.{axis} conflicts with the configured profile; request an operator override"
+                    f"choice.{axis} conflicts with the configured profile; omit that axis to use the router, "
+                    "or change this project policy through setup_project"
                 )
-        for axis in ("model", "effort"):
-            profile[axis] = choice[axis]
+        profile["model"] = configured.get("model", choice.get("model"))
+        profile["effort"] = _effort(configured, choice, policy, fallback_difficulty)
         if "provider" in configured:
             profile["provider"] = configured["provider"]
-        if choice["effort"] in {"max", "ultra"} and configured.get("effort") != choice["effort"]:
-            raise RoutingError(
-                "Maximum effort requires an explicit policy preference or operator override"
-            )
         if "min_confidence" in rule and (
             "confidence" not in choice or choice["confidence"] < rule["min_confidence"]
         ):
@@ -360,14 +491,69 @@ def resolve_selection(policy, choice, *, evidence=None, operator_override=False)
             )
     if "provider" in choice:
         profile["provider"] = choice["provider"]
+    for axis in ("model", "effort"):
+        _identifier(profile.get(axis), f"choice.{axis} (or configured profile.{axis})")
     profile["model"] = normalize_model(profile["model"])
     _execution_axes(profile)
     return {
         **profile,
+        **(
+            {"difficulty": _difficulty(choice["difficulty"], "choice.difficulty")}
+            if "difficulty" in choice
+            else {}
+        ),
         "rule": rule_index,
         "candidate": candidate_index,
         "rationale": choice["rationale"],
         "requires_approval": operator_override or rule.get("approval") == "captain",
+        "evidence": capture_quota_evidence(),
+        "uncertainty": ["Quota availability and model catalog support have not been verified"],
+    }
+
+
+def _resolve_classification(policy, choice, fallback_difficulty):
+    classification = choice["classification"]
+    _text(classification, "choice.classification")
+    if classification not in policy.get("classifications", {}):
+        raise RoutingError(
+            f"choice.classification {classification!r} is not configured; "
+            f"choose one of {list(policy.get('classifications', {}))}, "
+            "or add it to this project policy through setup_project"
+        )
+    for field in ("model", "harness", "provider", "rule", "candidate", "team"):
+        if field in choice:
+            raise RoutingError(
+                f"choice.{field} cannot accompany classification; the policy supplies worker profiles"
+            )
+    configured = policy["classifications"][classification]
+    profiles = _classification_profiles(configured, f"classifications.{classification}")
+    resolved = []
+    for profile in profiles:
+        selection = resolve_selection(
+            {"default": profile, "difficulty_levels": policy.get("difficulty_levels", {})},
+            {key: value for key, value in choice.items() if key != "classification"}
+            | {"rule": "default"},
+            fallback_difficulty=fallback_difficulty,
+        )
+        selection.update(classification=classification, rule=classification, candidate=None)
+        resolved.append(selection)
+    requires_approval = configured.get("approval") in _CONFIRMATIONS
+    if "team" not in configured:
+        return resolved[0] | {"requires_approval": requires_approval}
+    return {
+        "team": resolved,
+        "classification": classification,
+        **(
+            {"difficulty": _difficulty(choice["difficulty"], "choice.difficulty")}
+            if "difficulty" in choice
+            else {}
+        ),
+        **({"effort": choice["effort"]} if "effort" in choice else {}),
+        "rule": classification,
+        "candidate": None,
+        "rationale": choice["rationale"],
+        "requires_approval": requires_approval,
+        "team_description": configured.get("description", ""),
         "evidence": capture_quota_evidence(),
         "uncertainty": ["Quota availability and model catalog support have not been verified"],
     }
@@ -386,8 +572,9 @@ def policy_readiness(policy) -> dict:
             choice = {
                 "rule": rule,
                 "candidate": candidate,
-                "model": profile.get("model"),
-                "effort": profile.get("effort"),
+                **(
+                    {"effort": profile["effort"]} if "effort" in profile else {"difficulty": "hard"}
+                ),
                 "rationale": "Policy readiness validation",
                 "confidence": 1,
             }
@@ -398,11 +585,39 @@ def policy_readiness(policy) -> dict:
                 executable_profiles += 1
             except RoutingError as error:
                 blockers.append({"rule": rule, "candidate": candidate, "reason": str(error)})
+    for classification, configured in policy.get("classifications", {}).items():
+        classification_profiles = _classification_profiles(
+            configured, f"classifications.{classification}"
+        )
+        # Readiness asks whether each configured model can execute at a supported
+        # effort, not whether the coordinator has already classified a task's difficulty.
+        for candidate, profile in enumerate(classification_profiles):
+            try:
+                resolve_selection(
+                    {"default": profile, "difficulty_levels": policy.get("difficulty_levels", {})},
+                    {
+                        "rule": "default",
+                        **(
+                            {"effort": profile["effort"]}
+                            if "effort" in profile
+                            else {"difficulty": "hard"}
+                        ),
+                        "rationale": "Policy readiness validation",
+                    },
+                )
+            except RoutingError as error:
+                blockers.append(
+                    {"rule": classification, "candidate": candidate, "reason": str(error)}
+                )
+                break
+        else:
+            executable_profiles += len(classification_profiles)
     return {
         "valid": True,
         "routable": executable_profiles > 0,
         "executable_profiles": executable_profiles,
         "blockers": blockers,
-        "message": "Schema validation does not prove model access or authorize execution. "
+        "message": "Model catalog support and access have not been verified. "
+        "Schema validation does not authorize execution. "
         "Workers still need an explicit selection and any required approval.",
     }

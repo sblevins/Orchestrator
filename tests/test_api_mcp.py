@@ -14,6 +14,9 @@ from orchestrator.store import StateError, Store
 
 class APITests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict("os.environ", {"NO_MISTAKES_GATE": ""})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.home = Path(self.directory.name)

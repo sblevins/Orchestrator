@@ -21,7 +21,7 @@ class SetupTransportTests(unittest.TestCase):
             (project / "source.txt").write_text("unchanged source")
             store = Store(home)
             store.open_session("frontend", "claude")
-            environment = {**os.environ, "PYTHONPATH": str(ROOT)}
+            environment = {**os.environ, "PYTHONPATH": str(ROOT), "NO_MISTAKES_GATE": ""}
             for key in ("ORCHESTRATOR_CHILD", "ORCHESTRATOR_HOME", "ORCHESTRATOR_SESSION_ID"):
                 environment.pop(key, None)
             # Exercise real transports/state/files. Starting unrelated paid monitor models
@@ -67,11 +67,21 @@ class SetupTransportTests(unittest.TestCase):
                     else json.loads(result["content"][0]["text"])
                 )
 
+            # Real hook process, but without discovering whichever Claude Code process
+            # happens to be running this suite, which never owns the fixture session.
+            hook_program = (
+                "import sys; import orchestrator.bootstrap as bootstrap; "
+                "import orchestrator.hooks as hooks; "
+                "bootstrap.claude_parent = hooks.claude_parent = lambda: None; "
+                "from orchestrator.cli import main; raise SystemExit(main(sys.argv[1:]))"
+            )
+
             def hook(name, arguments):
                 result = subprocess.run(
                     [
                         sys.executable,
-                        str(ROOT / "bin/orchestrator"),
+                        "-c",
+                        hook_program,
                         "--home",
                         str(home),
                         "hooks",
@@ -117,14 +127,16 @@ class SetupTransportTests(unittest.TestCase):
                 self.assertFalse(configured["execution_authorized"])
                 self.assertTrue(operation("routing_policy")["available"])
                 self.assertEqual(operation("status")["setup"]["phase"], "configured")
-                self.assertIn(
-                    "setup is complete",
-                    operation(
-                        "setup_project",
-                        {"policy": policy, "expected_revision": configured["policy_revision"]},
-                        failure=True,
-                    ),
+                updated = operation(
+                    "setup_project",
+                    {"policy": policy, "expected_revision": configured["policy_revision"]},
                 )
+                self.assertTrue(updated["can_configure"])
+                preferences = operation(
+                    "configure_project",
+                    {"settings": {"roles": {"monitor": {"model": "Opus", "effort": "max"}}}},
+                )
+                self.assertIn("revision", preferences)
                 self.assertEqual((project / "source.txt").read_text(), "unchanged source")
                 self.assertFalse((project / ".gitignore").exists())
                 self.assertEqual(store.tasks(), [])
