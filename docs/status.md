@@ -58,15 +58,14 @@ Plain version: one tool call makes a private plan page; the page does not update
 
 ## Validation
 
-The full offline suite passes 563 tests with Python resource warnings treated as errors and an inherited validation-worker marker.
+The full offline suite passes with Python resource warnings treated as errors and an inherited validation-worker marker.
 This includes the optional real Mermaid parser and Chromium checks using temporary development tools, with no skipped tests in that run.
 Those temporary tools are test-only; exporting and viewing the HTML page needs no installed browser automation or Mermaid runtime.
-Artifact tests cover private publication, project isolation, real CLI/MCP calls, saved profiles and team rounds, injection attempts, 256-node graphs, offline rendering, theme and zoom controls, and no-JavaScript viewing.
+Artifact tests cover private publication, project isolation, real CLI/MCP calls, saved profiles and team rounds, exclusion of worker prompts, unavailable readiness under invalid settings, injection attempts, 256-node graphs, offline rendering, theme and zoom controls, and no-JavaScript viewing.
 Tests exercise real signed Git workspaces, dirty and unborn source snapshots, submodules, command execution and parent-death cleanup, peer messaging, quiet monitor delivery, standing authorization, critic-only retry, and the installed Pi SDK against a loopback fake provider.
 Image tests use a mocked transport and real binary artifact publication, with no paid image requests.
 Independent review identified and prompted fixes for stalled completion callbacks, observer turn rejection, and synthetic team issues that prevented unattended acceptance.
 A separate external-validation regression reproduces and fixes hooks blocking reviewer shell tools and structured output; it also verifies the long Stop watcher remains inert.
-The suite also passes with an inherited validation-worker marker.
 No paid application-provider requests were made.
 Offline fake-provider tests cannot prove paid model access, answer quality, image billing, live Claude rendering, voice behavior, or idle wakeup.
 Plain version: local tests check the saved pages and program behavior; paid model access and live coordinator conversations are separate checks.
