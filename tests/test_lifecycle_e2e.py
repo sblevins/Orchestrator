@@ -54,6 +54,8 @@ class LifecycleE2ETests(unittest.TestCase):
         return result
 
     def test_native_clear_keeps_durable_project_binding(self):
+        # The real SessionStart hook starts this home's supervisor.
+        self.addCleanup(self.cleanup_service)
         self.command(
             "hooks", "SessionEnd", payload={"session_id": self.session_id, "reason": "clear"}
         )
