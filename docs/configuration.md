@@ -87,7 +87,8 @@ For example:
 Each entry has exactly `alias` and `path`; at most 16 entries are allowed.
 Aliases are unique, 1-64 ASCII letters, digits, underscores or hyphens, starting with a letter or digit; `project` is reserved.
 Directories must exist when explicitly saving `context.read_roots` and when launching a specialist; conversational input may use `~` or a directory alias, which is resolved to an absolute canonical path before saving.
-Stored configuration requires canonical absolute path strings; duplicate directories, host-wide roots, authentication/control directories, and private supervisor state/configuration are rejected.
+Stored configuration requires canonical absolute path strings; duplicate directories, host-wide roots, the home directory, paths overlapping explicit authentication or private supervisor state/configuration, and paths inside Git, `.orchestrator` or host credential-store directories (`.ssh`, `.aws`, `.azure`, `.gnupg`, `.docker`, `.kube`) are rejected.
+Other folder names such as `secrets`, `tokens` or `.claude` do not block a reference; the Pi broker still hides credential files and Git metadata inside it.
 Launch rechecks availability and refuses a captured path that now resolves elsewhere, rather than following a retargeted symlink.
 Choose the specific reference directory, not a parent containing unrelated projects.
 Prompts list the captured aliases and absolute paths; use absolute tool paths for references, and resolve project-relative references against the registered project root.

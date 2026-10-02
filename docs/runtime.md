@@ -54,7 +54,8 @@ Configuration is captured in each task: later edits apply to new tasks, while at
 An eligible explicit `retry_review` uses current configuration while preserving the saved draft.
 Worker builders do not inherit specialist roots; `execution.base_ref` remains a worker checkout choice.
 Missing or retargeted reference directories fail the affected specialist launch, while configuration inspection, unrelated settings edits, and ordinary workers remain usable.
-Pi excludes private run/auth subtrees during reads and traversal rather than rejecting the entire registered checkout containing them.
+Pi excludes private run/auth subtrees and the supervisor's private state and configuration during reads and traversal rather than rejecting the entire registered checkout containing them.
+Tracked source such as `config/default.toml` stays readable; Claude `--add-dir` cannot exclude subtrees, so this protection applies to Pi specialists only.
 Plain version: new specialist work can read the folders you named, but old tasks keep their saved folder list and workers keep their existing access.
 A private working directory and read-only tools are not a hostile-process isolation boundary.
 

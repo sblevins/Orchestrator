@@ -66,8 +66,13 @@ Specialist `context.read_roots` pass explicitly through the adapter, SDK bridge 
 Specialist relative paths still target the registered project root; additional roots use absolute paths and appear with aliases in the prompt.
 Read, list, find and grep work inside these additional roots; credential exclusions and resolved-path containment still apply.
 Workers never inherit specialist roots, and the broker rejects extra roots in write mode or with worker context, even if supplied outside normal builders.
-Extra roots cannot overlap private run/auth paths, and the Pi installation remains outside all model-readable roots.
-A registered primary project containing private runtime paths remains usable: Pi denies those specific files/subtrees and omits them from listings and recursive searches, without blocking ordinary source files above them.
+Extra roots cannot overlap private run/auth paths or private supervisor state, and the Pi installation remains outside all model-readable roots.
+Folder names above a selected root, such as `secrets`, `tokens` or `.claude`, do not block it; credential files and Git metadata inside it stay hidden.
+The runtime passes the supervisor's private paths to the specialist broker: `data/`, `config/local.toml`, `config/projects/`, `config/workflows/` and `config/crew-dispatch.json` under the Orchestrator home.
+A registered primary project containing those paths, such as a self-hosted Orchestrator checkout, remains usable: Pi denies those specific files/subtrees and omits them from listings and recursive searches, while tracked source such as `config/default.toml` stays readable.
+Claude `--add-dir` grants whole directories and cannot hide subtrees, so a Claude specialist for a self-hosted checkout can read that checkout's private state.
+The broker limits only Pi model file tools, not unsandboxed commands, other processes, or native Claude tools.
+Plain version: when Orchestrator works on its own folder, Pi specialists can read its normal code and default settings, but not other tasks' files or private settings; Claude specialists cannot be limited this way.
 Plain version: naming a reference folder lets specialists inspect it, not edit it or give workers access.
 `grep` uses literal text, not regular expressions.
 Command-enabled restricted workers use the OS sandbox unless `commands.sandbox = false`; trusted workers can build and test with host access.

@@ -35,6 +35,7 @@ def build_command(
     *,
     project_root: Path | None = None,
     read_roots: list[dict] | None = None,
+    private_paths: tuple[Path, ...] = (),
     stdin_prompt: bool = False,
 ) -> list[str]:
     """Build a read-only invocation; session_id resumes an existing conversation.
@@ -43,6 +44,7 @@ def build_command(
     Other callers retain positional prompts unless stdin_prompt is enabled.
     Explicit read roots are checked against the filesystem; no file contents are read
     or written here, including the optional harness output artifact.
+    Private supervisor paths are hidden by the Pi broker; Claude cannot hide subtrees.
     """
     try:
         settings = role_config(config, role)
@@ -59,7 +61,7 @@ def build_command(
         read_roots = validate_read_roots(
             read_roots if read_roots is not None else [],
             require_available=True,
-            excluded_paths=(cwd,),
+            excluded_paths=(cwd, *private_paths),
         )
     except ValueError as error:
         raise AdapterError(str(error)) from error
@@ -107,6 +109,7 @@ def build_command(
             output_path,
             project_root=project_root,
             read_roots=read_roots,
+            private_paths=private_paths,
             stdin_prompt=stdin_prompt,
         )
     else:
@@ -124,6 +127,7 @@ def build_pi_command(
     *,
     project_root=None,
     read_roots=None,
+    private_paths=(),
     stdin_prompt=True,
     mode="read",
     worker_context=None,
@@ -147,12 +151,14 @@ def build_pi_command(
         read_roots = validate_read_roots(
             read_roots if read_roots is not None else [],
             require_available=True,
-            excluded_paths=(cwd,),
+            excluded_paths=(cwd, *private_paths),
         )
     except ValueError as error:
         raise AdapterError(str(error)) from error
-    if read_roots and (mode != "read" or worker_context is not None):
-        raise AdapterError("Additional read roots are only available to read-only specialists")
+    if (read_roots or private_paths) and (mode != "read" or worker_context is not None):
+        raise AdapterError(
+            "Additional read roots and private paths are only available to read-only specialists"
+        )
     command = config.get("adapters", {}).get("pi", {}).get("command")
     if not isinstance(command, list) or len(command) != 1:
         raise AdapterError("Pi command must contain only one executable")
@@ -191,6 +197,7 @@ def build_pi_command(
         "cwd": _argument(str(cwd), "cwd"),
         "project_root": _argument(str(project_root), "project_root") if project_root else None,
         "read_roots": read_roots,
+        "private_paths": [_argument(str(path), "private_path") for path in private_paths],
     }
     if mode == "write" and config.get("images", {}).get("enabled", False):
         selected.append("generate_image")

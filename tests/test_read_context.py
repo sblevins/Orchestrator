@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from orchestrator import runtime
 from orchestrator.adapters import build_command, build_pi_command
 from orchestrator.config import ConfigurationError, load_config, role_config, validate_config
 from orchestrator.pi_tools import FileBroker, PolicyError, launch
@@ -262,6 +263,132 @@ class ReadContextTests(ContextFixture, unittest.TestCase):
             with self.assertRaises(PolicyError):
                 FileBroker({**options, "read_roots": [{"alias": "private", "path": str(root)}]})
 
+    def test_self_hosted_runtime_hides_supervisor_private_state_from_broker(self):
+        home = self.root / "orchestrator-checkout"
+        (home / "src").mkdir(parents=True)
+        (home / "config").mkdir()
+        (home / "src/app.py").write_text("PUBLIC_SOURCE = True\n")
+        (home / "config/default.toml").write_text("# PUBLIC_DEFAULT_CONFIG\n")
+        store = Store(home)
+        store.add_project("self", str(home))
+        store.open_session("self", "test", "self")
+        other_root = self.root / "other-project"
+        other_root.mkdir()
+        store.add_project("other", str(other_root))
+        store.open_session("other", "test", "other")
+        configure_project(store, "other", {"execution": {"max_parallel": 3}})
+        sibling_run = home / "data/runs/sibling-task/sibling-token"
+        sibling_run.mkdir(parents=True)
+        (sibling_run / "prompt.txt").write_text("PRIVATE_SENTINEL sibling prompt")
+        notes = home / "data/projects/other/notes"
+        notes.mkdir(parents=True, exist_ok=True)
+        (notes / "BRIEF").write_text("PRIVATE_SENTINEL other brief")
+        (home / "config/workflows").mkdir()
+        (home / "config/workflows/private.json").write_text('{"PRIVATE_SENTINEL": true}')
+        (home / "config/crew-dispatch.json").write_text('{"PRIVATE_SENTINEL": true}')
+        (home / "config/local.toml").write_text("# PRIVATE_SENTINEL local\n")
+        other_settings = (home / "config/projects/other.json").read_text()
+        (home / "config/projects/other.json").write_text(
+            other_settings.replace("{", '{"_comment": "PRIVATE_SENTINEL",', 1)
+        )
+        reference = self.root / "secrets/tokens/reference"
+        (reference / "docs").mkdir(parents=True)
+        (reference / "docs/design.md").write_text("REFERENCE_SOURCE design\n")
+        (reference / ".env").write_text("CREDENTIAL_SENTINEL=1\n")
+        (reference / "credentials.json").write_text('{"CREDENTIAL_SENTINEL": 1}')
+        subprocess.run(["git", "init", "-q", str(reference)], check=True)
+        (reference / ".git/description").write_text("CREDENTIAL_SENTINEL metadata\n")
+        claude_worktree = self.root / "main-repo/.claude/worktrees/design"
+        claude_worktree.mkdir(parents=True)
+        (claude_worktree / "plan.md").write_text("CLAUDE_WORKTREE_SOURCE\n")
+        roots = [
+            {"alias": "reference", "path": str(reference)},
+            {"alias": "claude-worktree", "path": str(claude_worktree)},
+        ]
+        saved = configure_project(store, "self", {"context": {"read_roots": roots}})
+        self.assertEqual(saved["settings"]["context"]["read_roots"], roots)
+        queued = store.enqueue(
+            "self", "self", "critic", "Review self-hosted source", load_config(home, "self")
+        )
+        claimed = store.claim_next(1)
+        self.assertEqual(claimed["id"], queued["id"])
+        launched = []
+        real_popen = subprocess.Popen
+
+        def capture(command, *arguments, **keywords):
+            launched.append(command)
+            return real_popen([sys.executable, "-c", "raise SystemExit(1)"], *arguments, **keywords)
+
+        with patch.object(runtime.subprocess, "Popen", side_effect=capture):
+            self.assertEqual(runtime.run_task(home, claimed["id"], claimed["token"]), 1)
+        self.assertEqual(len(launched), 1)
+        options = json.loads(launched[0][-1])
+        requests = [
+            {"name": "read", "arguments": {"path": "src/app.py"}},
+            {"name": "read", "arguments": {"path": "config/default.toml"}},
+            {"name": "read", "arguments": {"path": str(reference / "docs/design.md")}},
+            {"name": "read", "arguments": {"path": str(claude_worktree / "plan.md")}},
+            {"name": "ls", "arguments": {"path": "."}},
+            {"name": "ls", "arguments": {"path": "config"}},
+            {"name": "find", "arguments": {"path": ".", "pattern": "**/*"}},
+            {"name": "grep", "arguments": {"path": ".", "pattern": "SENTINEL"}},
+            {"name": "find", "arguments": {"path": str(reference), "pattern": "**/*"}},
+            {"name": "grep", "arguments": {"path": str(reference), "pattern": "SENTINEL"}},
+            {"name": "read", "arguments": {"path": str(sibling_run / "prompt.txt")}},
+            {"name": "read", "arguments": {"path": "data/projects/other/notes/BRIEF"}},
+            {"name": "read", "arguments": {"path": "config/projects/other.json"}},
+            {"name": "read", "arguments": {"path": "config/local.toml"}},
+            {"name": "read", "arguments": {"path": "config/workflows/private.json"}},
+            {"name": "read", "arguments": {"path": "config/crew-dispatch.json"}},
+            {"name": "ls", "arguments": {"path": "data/runs"}},
+            {"name": "grep", "arguments": {"path": "config/projects", "pattern": "SENTINEL"}},
+            {"name": "read", "arguments": {"path": str(reference / ".env")}},
+            {"name": "read", "arguments": {"path": str(reference / "credentials.json")}},
+            {"name": "read", "arguments": {"path": str(reference / ".git/description")}},
+        ]
+        for trusted in (False, True):
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    str(fixtures.BROKER),
+                    "serve",
+                    json.dumps({**options, "trusted": trusted}),
+                ],
+                input="".join(json.dumps(request) + "\n" for request in requests),
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            results = [json.loads(line) for line in process.stdout.splitlines()]
+            self.assertEqual([result["ok"] for result in results], [True] * 10 + [False] * 11)
+            self.assertIn("PUBLIC_SOURCE", results[0]["text"])
+            self.assertIn("PUBLIC_DEFAULT_CONFIG", results[1]["text"])
+            self.assertIn("REFERENCE_SOURCE", results[2]["text"])
+            self.assertIn("CLAUDE_WORKTREE_SOURCE", results[3]["text"])
+            self.assertIn("default.toml", results[5]["text"])
+            self.assertIn("src/app.py", results[6]["text"])
+            self.assertIn("docs/design.md", results[8]["text"])
+            for result in results:
+                for private_name in (
+                    "SENTINEL",
+                    "data",
+                    "local.toml",
+                    "projects",
+                    "workflows",
+                    "crew-dispatch",
+                    "sibling",
+                    "credentials",
+                    ".env",
+                ):
+                    self.assertNotIn(private_name, result.get("text", ""))
+        for changes in (
+            {"mode": "write", "cwd": str(self.root / "worker-worktree")},
+            {"worker_context": {"task_id": "malicious"}},
+        ):
+            with self.assertRaisesRegex(PolicyError, "Private supervisor paths"):
+                FileBroker({**options, "read_roots": [], **changes})
+
     def test_claude_args_and_specialist_prompts_discover_roots(self):
         self.configure()
         for role in ("planner", "critic", "monitor"):
@@ -505,7 +632,12 @@ class ReadContextTests(ContextFixture, unittest.TestCase):
         credential_directory.mkdir()
         auth_directory = self.root / "custom-login"
         auth_directory.mkdir()
-        for path in (credential_directory, self.reference / "docs/.."):
+        for path in (
+            credential_directory,
+            self.reference / "docs/..",
+            self.project / ".git",
+            self.project / ".git/refs",
+        ):
             config = load_config(self.home)
             config["context"]["read_roots"] = [{"alias": "invalid", "path": str(path)}]
             with self.assertRaises(ConfigurationError):
@@ -533,6 +665,7 @@ class ReadContextTests(ContextFixture, unittest.TestCase):
         self.assertEqual(repaired["settings"]["context"]["read_roots"], [])
 
     def test_invalid_shapes_paths_aliases_and_supervisor_roots(self):
+        (self.home / "config").mkdir(exist_ok=True)
         for roots in (
             {},
             ["wrong"],
@@ -546,6 +679,7 @@ class ReadContextTests(ContextFixture, unittest.TestCase):
             [{"alias": "all", "path": "/"}],
             [{"alias": "private", "path": str(self.home / "data")}],
             [{"alias": "private", "path": str(self.home)}],
+            [{"alias": "private", "path": str(self.home / "config")}],
         ):
             with self.subTest(roots=roots), self.assertRaises(ConfigurationError):
                 self.configure(roots)

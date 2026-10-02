@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from .config import ConfigurationError, load_config, role_config
+from .read_context import supervisor_exclusions, validate_read_roots
 from .store import NOTE_NAMES, Store, atomic_write, encode
 
 OUTPUT_LIMIT = 8 * 1024 * 1024
@@ -221,8 +222,6 @@ def _prompt(store: Store, task: dict, role: dict) -> str:
         "personalization": task["config"]["personalization"],
     }
     if task["role"] != "worker":
-        from .read_context import supervisor_exclusions, validate_read_roots
-
         context["read_roots"] = validate_read_roots(
             task["config"].get("context", {}).get("read_roots", []),
             require_available=True,
@@ -334,6 +333,7 @@ def run_task(home: Path, task_id: str, token: str) -> int:
                 session_id=_resume_session(store, task),
                 project_root=Path(store.project(task["project_id"])["root"]),
                 read_roots=config.get("context", {}).get("read_roots", []),
+                private_paths=supervisor_exclusions(store.home),
                 stdin_prompt=True,
             )
         deadline = time.monotonic() + settings["task_timeout_seconds"]

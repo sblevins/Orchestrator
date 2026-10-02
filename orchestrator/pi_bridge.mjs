@@ -42,7 +42,8 @@ function brokerClient(options, onFailure) {
   }
   const child = spawn(options.python, ['-I', options.broker, 'serve', JSON.stringify({
     cwd: options.cwd, project_root: options.project_root, mode: options.mode, trusted: options.trusted,
-    read_roots: options.read_roots ?? [], auth_path: options.auth_path, agent_dir: options.agent_dir,
+    read_roots: options.read_roots ?? [], private_paths: options.private_paths ?? [],
+    auth_path: options.auth_path, agent_dir: options.agent_dir,
     images: options.images, image_state_directory: options.image_state_directory,
     commands: options.commands, worker_context: options.worker_context,
     tool_names: options.tool_names ?? options.tools,

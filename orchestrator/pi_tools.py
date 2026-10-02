@@ -149,6 +149,14 @@ class FileBroker:
             raise PolicyError("write worktree must be separate from source checkout")
         context_policy = owned_module("read_context")
         private_paths = [options[key] for key in ("auth_path", "agent_dir") if options.get(key)]
+        supervisor_private = options.get("private_paths", [])
+        if not isinstance(supervisor_private, list) or any(
+            not isinstance(path, str) or not os.path.isabs(path) for path in supervisor_private
+        ):
+            raise PolicyError("private_paths must be a list of absolute paths")
+        if supervisor_private and (self.mode != "read" or self.worker_context is not None):
+            raise PolicyError("Private supervisor paths are only applied to read-only specialists")
+        private_paths += supervisor_private
         if self.mode == "read" and self.worker_context is None and self.cwd != self.project:
             private_paths.append(self.cwd)
         try:

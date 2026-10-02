@@ -6,6 +6,7 @@ from pathlib import Path
 
 MAX_READ_ROOTS = 16
 ALIAS = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+# Version control, orchestration and host credential stores, never reference source.
 CONTROL_DIRECTORIES = {
     ".git",
     ".orchestrator",
@@ -15,25 +16,6 @@ CONTROL_DIRECTORIES = {
     ".gnupg",
     ".docker",
     ".kube",
-    ".pi",
-    ".claude",
-    "credentials",
-    "secrets",
-    "auth.json",
-    "credentials.json",
-    "token",
-    "tokens",
-    "secrets.json",
-    "id_rsa",
-    "id_ed25519",
-    "id_ecdsa",
-    "id_dsa",
-    ".npmrc",
-    ".pypirc",
-    ".netrc",
-    "_netrc",
-    ".pgpass",
-    ".git-credentials",
 }
 # These are host-wide locations, not individually selected project directories.
 HOST_ROOTS = {
@@ -135,12 +117,7 @@ def validate_read_roots(value, *, normalize=False, require_available=False, excl
             canonical in HOST_ROOTS
             or canonical == home
             or any(canonical == root or root in canonical.parents for root in HOST_CONTROL_ROOTS)
-            or any(
-                part.lower() in CONTROL_DIRECTORIES
-                or part.lower().startswith((".env", "credentials.", "secrets."))
-                or part.lower().endswith((".pem", ".key", ".p12", ".pfx"))
-                for part in canonical.parts
-            )
+            or any(part.lower() in CONTROL_DIRECTORIES for part in canonical.parts)
             or any(overlaps(canonical, private) for private in exclusions)
         ):
             raise ValueError(
@@ -157,5 +134,16 @@ def validate_read_roots(value, *, normalize=False, require_available=False, excl
 
 
 def supervisor_exclusions(home):
-    """Private state/configuration must not become model-readable reference material."""
-    return (Path(home) / "data", Path(home) / "config")
+    """Private supervisor state and configuration, never model-readable.
+
+    Tracked configuration such as config/default.toml stays ordinary source when
+    the supervisor home is itself a registered project checkout.
+    """
+    home = Path(home)
+    return (
+        home / "data",
+        home / "config" / "local.toml",
+        home / "config" / "projects",
+        home / "config" / "workflows",
+        home / "config" / "crew-dispatch.json",
+    )
