@@ -140,7 +140,7 @@ The critic defaults to `gpt-6-astra` through Pi with provider `openai-codex` and
 Exact model identifiers are passed unchanged.
 Claude Code also accepts case-insensitive family names `Opus`, `Sonnet`, `Haiku`, and `Fable`; other models use Pi with an explicit `provider` setting.
 These requested identifiers are not a claim of provider availability; configure the exact identifier your provider supports.
-Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Pi efforts are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Pi efforts are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 Explicit efforts never silently fall back; `max-supported` is an intentional capability-based selector, not an effort downgrade.
 Plain version: you can change any model name, but the chosen command must support the effort setting and the provider must actually offer that model.
 

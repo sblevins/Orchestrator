@@ -48,7 +48,7 @@ Plain version: model names follow the available catalog, and making an image is 
 
 ## Validation
 
-The integrated checkout passes 505 offline tests with Python resource warnings treated as errors.
+The integrated checkout passes the full offline test suite with Python resource warnings treated as errors.
 Ruff lint and formatting, Node syntax checks, and `git diff --check` pass.
 Tests exercise real signed Git workspaces, dirty and unborn source snapshots, submodules, command execution and parent-death cleanup, peer messaging, quiet monitor delivery, standing authorization, critic-only retry, and the installed Pi SDK against a loopback fake provider.
 Image tests use a mocked transport and real binary artifact publication, with no paid image requests.
