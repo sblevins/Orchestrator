@@ -15,7 +15,7 @@ orchestrator = "orchestrator.cli:main"
 packages = ["orchestrator"]
 
 [tool.setuptools.package-data]
-orchestrator = ["pi_bridge.mjs", "pi_models.mjs"]
+orchestrator = ["pi_bridge.mjs", "pi_models.mjs", "assets/*.css", "assets/*.js"]
 
 [tool.ruff]
 line-length = 100

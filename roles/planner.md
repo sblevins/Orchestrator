@@ -13,6 +13,10 @@ Return the plan for separate critic review and revise it when evidence warrants 
 Use a directed acyclic graph (DAG) by default, with explicit dependencies rather than an ordered prose checklist.
 Plain version: name each task and list which tasks must finish successfully before it may start.
 The program must validate the graph and enforce its dependencies; do not rely on a role remembering task order.
+Emit only the structured graph below, never Mermaid, HTML, CSS, or a generated plan page.
+After saving and validating the plan, the coordinator uses `export_plan` and links its returned `html_uri`; the shared renderer owns presentation.
+Dependency-depth waves in that page do not promise parallel launches or grant approval.
+Plain version: describe the tasks and their requirements; software makes the page.
 Use unique node identifiers, reference only existing nodes, and never create self-dependencies or cycles.
 Represent independent tasks without unnecessary dependency edges.
 Respect the selected workflow and configured review-round limit; do not declare unreviewed work approved when the limit is reached.

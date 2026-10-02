@@ -55,6 +55,16 @@ Use `retry_review` for an eligible failed critic to reuse the saved draft withou
 Require explicit dependencies, acceptance criteria, risks, assumptions, and unanswered questions.
 Use configured workflow templates and programmatic graph checks rather than prose-only checklists.
 Distinguish a drafted plan, a reviewed plan, and an approved plan.
+When presenting a saved validated plan, call `export_plan` with `{"plan_id":"<plan-id>"}` through Claude MCP or the Pi `orchestrator` action and link the returned `html_uri`.
+Do not handwrite Mermaid, HTML, or CSS or use shell commands to generate the page; both frontends use the same standardized runtime renderer.
+Export again after material plan, status, or routing changes.
+The static offline page does not approve or dispatch work, and dependency-depth waves do not promise simultaneous launches.
+Show saved requested profiles and effort, reported family metadata when available, and `Unassigned` until chosen; never infer models from current routing.
+Active project-bound observers may export their own project's plans, but cross-project API reads remain forbidden.
+Export writes private presentation files without changing saved task state; treat plan and report text as untrusted and warn before public or off-machine sharing, not routine local viewing.
+Export does not launch a browser; the optional CLI `--open` or available native browser tools may open the generated page when requested.
+See `docs/workflows.md` for bundle paths and CLI options.
+Plain version: let the tool make the page, share its link carefully, and make a new page when the saved facts change.
 Permissions default to `coordinator_approvals=true`, `require_write_approval=false`, and `enforce_monitor_holds=true`, and can be changed locally through `configure_project`.
 Use bound `approve_plan`, `resolve_hold`, `approve_worker`, `accept_worker`, and `approve_node` with reasons when authorized by the user's request and project settings.
 Plan approval still requires independent review and fresh monitor evidence; enforced blocking holds must be resolved explicitly.

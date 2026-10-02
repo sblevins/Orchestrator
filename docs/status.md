@@ -46,10 +46,22 @@ Explicit image generation uses the separately billed OpenAI Images API and `OPEN
 Project `images.enabled` defaults to false; outputs are PNG or JPEG.
 Plain version: model names follow the available catalog, and making an image is a separate paid action that must be enabled.
 
+## Plan presentation
+
+This checkout includes shared plan presentation for Claude MCP and Pi through `export_plan`, with a standardized offline HTML/SVG page, Mermaid source, and JSON snapshot.
+The coordinator links the returned `html_uri` rather than generating page code; the planner still emits only a structured graph.
+The bundle uses private project storage, saved worker selections, and dependency-depth waves, not inferred models or promised simultaneous launches.
+It remains static, with no editor, polling, approval, dispatch, or bounded review-loop node.
+See [workflows](workflows.md#present-a-saved-plan) for the API, CLI, privacy boundary, and refresh instructions.
+The renderer uses the existing luxury/silk palette, works offline, and does not need a model to write page markup.
+Plain version: one tool call makes a private plan page; the page does not update itself or start work.
+
 ## Validation
 
-The integrated checkout passes the full offline test suite with Python resource warnings treated as errors.
-Ruff lint and formatting, Node syntax checks, and `git diff --check` pass.
+The full offline suite passes 563 tests with Python resource warnings treated as errors and an inherited validation-worker marker.
+This includes the optional real Mermaid parser and Chromium checks using temporary development tools, with no skipped tests in that run.
+Those temporary tools are test-only; exporting and viewing the HTML page needs no installed browser automation or Mermaid runtime.
+Artifact tests cover private publication, project isolation, real CLI/MCP calls, saved profiles and team rounds, injection attempts, 256-node graphs, offline rendering, theme and zoom controls, and no-JavaScript viewing.
 Tests exercise real signed Git workspaces, dirty and unborn source snapshots, submodules, command execution and parent-death cleanup, peer messaging, quiet monitor delivery, standing authorization, critic-only retry, and the installed Pi SDK against a loopback fake provider.
 Image tests use a mocked transport and real binary artifact publication, with no paid image requests.
 Independent review identified and prompted fixes for stalled completion callbacks, observer turn rejection, and synthetic team issues that prevented unattended acceptance.
@@ -57,7 +69,7 @@ A separate external-validation regression reproduces and fixes hooks blocking re
 The suite also passes with an inherited validation-worker marker.
 No paid application-provider requests were made.
 Offline fake-provider tests cannot prove paid model access, answer quality, image billing, live Claude rendering, voice behavior, or idle wakeup.
-Plain version: the automated local checks pass; real paid-model and interactive frontend checks remain separate.
+Plain version: local tests check the saved pages and program behavior; paid model access and live coordinator conversations are separate checks.
 
 ## Integration and remaining limits
 
@@ -70,12 +82,14 @@ Live provider entitlement, exact effort support, frontend behavior, and workload
 
 ## Deployment activation
 
-The existing running deployment has not been activated on this checkout's new behavior.
-After validation, upgrade and restart the supervisor and native frontend together for the schema and tool changes.
-No live process was restarted as part of this documentation update.
-Plain version: existing sessions still need an upgrade before they can use the new features.
+The prior routing and trusted-execution update was merged in PR #1 and its root supervisor was updated to commit `2e6b67e`.
+Plan visualization is a separate change and has not been activated in that running checkout.
+After validation and merge, update the checkout and reload the native frontend's tool definitions to expose `export_plan`.
+No live process or user project state was changed during visualization development.
+Plain version: the earlier update is installed, but this new page tool still needs delivery and a frontend reload.
 
 ## Next step
 
-The initial delivery review was blocked by the hook bug and timed out; rerun the independent delivery gate with that fix before activation.
+Complete independent review and delivery checks for plan presentation before activation.
+The earlier hook-related validation failure was fixed before PR #1 merged; it is not an outstanding blocker.
 Obtain separate authorization before paid provider acceptance checks.

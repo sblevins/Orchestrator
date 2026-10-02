@@ -52,8 +52,12 @@ Active mid-turn steering, automated test execution, automatic shipping, forge wo
 
 Fleet hierarchies, cross-home handoffs, task-axi/Beads adoption, automatic tool updates, social integrations, custom voice services, and third-party Pi graph plugins are not required for the initial local coordinator.
 Pi visibility uses the already installed sub-agent observer integration when available; this project does not install third-party plugins for the user.
-A visual graph editor and distributed durability through Temporal are also not implemented.
-The current program exposes a validated graph and readiness through tools and the CLI.
+A visual graph editor, bounded review-loop node, and distributed durability through Temporal are not implemented.
+Plan presentation uses the shared `export_plan` renderer for Claude MCP and Pi, with a private static HTML/SVG page, standard Mermaid source, and saved JSON snapshot.
+The coordinator links the returned `html_uri` rather than writing Mermaid, HTML, or CSS.
+See [workflows](workflows.md#present-a-saved-plan) for export instructions and operator CLI options.
+The page reuses the public explainer's luxury/silk palette without becoming a public publishing feature or a live approval and dispatch interface.
+Plain version: the program makes a private plan page, not an editor or a way to start work.
 
 The pirate persona, terminal keystroke injection, implicit approval, unrestricted core-specialist shell tools, and silent model fallback are intentionally excluded.
 Trusted workers can run commands through owned `run_command`; standing `execution.unattended` authorization permits eligible plan approval and candidate acceptance without granting policy-required worker approval.

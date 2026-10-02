@@ -22,6 +22,7 @@ READ_ACTIONS = {
     "delivery_updates",
     "read_note",
     "graph",
+    "export_plan",
     "workflows",
     "routing_policy",
     "worker",
@@ -286,6 +287,14 @@ def request(home: Path, session_id: str, action: str, payload: dict | None = Non
         return operation(store, session_id, **payload)
     if action in WORKER_ACTIONS:
         return _worker_request(store, session_id, project_id, action, payload)
+    if action == "export_plan":
+        from .plan_exports import export_plan
+
+        if set(payload) != {"plan_id"}:
+            raise StateError(
+                "export_plan requires only plan_id; the framework owns page generation"
+            )
+        return export_plan(store, _text(payload, "plan_id", 96), project_id=project_id)
     config = load_config(home, project_id)
     if action in {
         "approve_plan",
@@ -483,6 +492,7 @@ FIELDS = {
         ["name", "text", "expected_revision"],
     ),
     "graph": ({"plan_id": "string"}, ["plan_id"]),
+    "export_plan": ({"plan_id": "string"}, ["plan_id"]),
     "workflows": ({}, []),
     "request_review": ({"reason": "string"}, ["reason"]),
     "pause_project": ({"reason": "string"}, ["reason"]),
@@ -526,6 +536,7 @@ DESCRIPTIONS = {
     "read_note": "Read a private project knowledge note and its revision for safe updates.",
     "write_note": "Save sourced project knowledge only if its expected revision still matches; no runtime status notes.",
     "graph": "Inspect the validated dependency graph, node states, readiness, and dispatch blockers.",
+    "export_plan": "Generate the standard offline HTML plan view, Mermaid diagram and JSON snapshot from this project's saved plan. Supply only plan_id, never write HTML yourself. Returns file links; no browser, worker, approval or network call. Re-export for updated status.",
     "workflows": "Inspect customizable workflow graph templates used to guide planning.",
     "request_review": "Ask the slow monitor to inspect an issue; cannot bypass its failure cooldown.",
     "pause_project": "Pause new planning/review launches, not running processes or monitor observations.",
@@ -560,7 +571,7 @@ def tool_definitions(require_session: bool) -> list[dict]:
                     "additionalProperties": False,
                 },
                 "annotations": {
-                    "readOnlyHint": name in READ_ACTIONS,
+                    "readOnlyHint": name in READ_ACTIONS and name != "export_plan",
                     "destructiveHint": name not in READ_ACTIONS,
                     "openWorldHint": name in {"start_plan", "bind_project", "request_review"},
                 },

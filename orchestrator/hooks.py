@@ -77,6 +77,7 @@ def _meaningful_tool(value):
                 "projects",
                 "task",
                 "graph",
+                "export_plan",
                 "workflows",
                 "read_note",
             }:
