@@ -91,17 +91,17 @@ def mermaid_diagram(snapshot: dict) -> str:
                     _compact(_assignment(node), 90),
                 )
             )
-            # HTML-free Mermaid SVG labels do not decode decimal entities
-            # consistently across versions. Escape syntax boundaries with named
-            # entities instead, keeping ordinary Unicode text readable. Escape
-            # '#' too so user text cannot smuggle Mermaid's own #NN; entities.
+            # HTML-free Mermaid SVG labels decode only &amp;, &lt; and &gt;, so
+            # any other entity shows as literal text. Show the label delimiter,
+            # Mermaid's own '#name;' entity marker and the markdown-string
+            # backtick as their full-width forms so they display as characters.
             encoded = (
                 label.replace("&", "&amp;")
-                .replace("#", "&num;")
-                .replace('"', "&quot;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
-                .replace("`", "&grave;")
+                .replace('"', "\uff02")
+                .replace("#", "\uff03")
+                .replace("`", "\uff40")
             )
             lines.append(f'    {identifiers[node["id"]]}["{encoded}"]')
         lines.append("  end")

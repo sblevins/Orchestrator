@@ -494,7 +494,7 @@ if (process.env.PLAN_RENDERING_BROWSER) {
     const mermaidPage = await browser.newPage();
     await mermaidPage.addScriptTag({path: require.resolve("mermaid").replace(
       /[^/]+$/, "mermaid.min.js")});
-    await mermaidPage.evaluate(async (diagrams) => {
+    await mermaidPage.evaluate(async ([diagrams, displayed]) => {
       mermaid.initialize({startOnLoad: false, securityLevel: "strict", htmlLabels: true});
       for (const [index, diagram] of diagrams.entries()) {
         const result = await mermaid.render(`verified${index}`, diagram);
@@ -507,9 +507,15 @@ if (process.env.PLAN_RENDERING_BROWSER) {
         if (index === 1 && !text.includes("<b>not markup</b>")) {
           throw new Error("Mermaid did not preserve literal label text: " + text);
         }
+        // Mermaid wraps words into separate tspans, so compare without spaces.
+        const glyphs = text.replace(/\s+/g, "");
+        if (index === 2 && (!glyphs.includes(displayed.replace(/\s+/g, "")) ||
+                            /&[a-z#0-9]+;/.test(text))) {
+          throw new Error("Mermaid displayed escape codes instead of characters: " + text);
+        }
         if (!text.includes("pending")) throw new Error("Unreadable encoded Mermaid labels");
       }
-    }, [input.diagrams[0], input.diagrams[3]]);
+    }, [[input.diagrams[0], input.diagrams[3], input.diagrams[4]], input.displayed]);
     await mermaidPage.close();
     const noScript = await browser.newContext({javaScriptEnabled: false});
     const offlinePage = await noScript.newPage();
@@ -552,7 +558,11 @@ if (process.env.PLAN_RENDERING_BROWSER) {
                                     ]
                                 )
                             ),
+                            mermaid_diagram(snapshot([node('Say "hi" #42 #quot; `code` R&D <b>')])),
                         ],
+                        # Mermaid cannot display these three characters in
+                        # plain-text labels; their full-width forms must show.
+                        "displayed": "Say \uff02hi\uff02 \uff0342 \uff03quot; \uff40code\uff40 R&D <b>",
                     }
                 ),
                 encoding="utf-8",
